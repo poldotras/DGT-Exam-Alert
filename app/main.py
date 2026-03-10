@@ -97,7 +97,7 @@ while not exit_flag:
                     exit_flag = True
                 else:
                     print("\nNo hay resultado - " + hora_actual)
-                    loop.run_until_complete(update_funcionando(hora_actual))
+                    # loop.run_until_complete(update_funcionando(hora_actual))
                     time.sleep(config.update_time)
                     continue
     except Exception as e:
