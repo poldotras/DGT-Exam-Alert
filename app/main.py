@@ -5,8 +5,9 @@ import json
 from datetime import datetime, timedelta, date
 import sentry_sdk
 import logging
+from logging.handlers import RotatingFileHandler
 
-from utils import fetch_datos_examenes
+from utils import fetch_datos_examenes, cleanup_old_files
 from enums.estados_enum import EstadosEnum
 from errors.ServiceDown import ServiceDown
 
@@ -14,10 +15,14 @@ from database_manager import DatabaseManager
 from browser_manager import BrowserManager
 from telegram_bot import TelegramBot
 
-#TODO: Añadir borrar fotos antiguas
-TIEMPO_ENTRE_EXAMENES = os.getenv("TIEMPO_ENTRE_EXAMENES", 300)
-TIEMPO_ESPERA_SERVICE_DOWN = int(os.getenv('TIEMPO_ESPERA_SERVICE_DOWN', 60))
+TIEMPO_ENTRE_EXAMENES = int(os.getenv("TIEMPO_ENTRE_EXAMENES", 300))
+TIEMPO_ESPERA_SERVICE_DOWN = int(os.getenv("TIEMPO_ESPERA_SERVICE_DOWN", 60))
 DIAS_SE_CONSIDERA_CADUCADO = int(os.getenv("DIAS_SE_CONSIDERA_CADUCADO", 7))
+DIAS_RETENCION_SCREENSHOTS = int(os.getenv("DIAS_RETENCION_SCREENSHOTS", 30))
+
+LOG_FILE = os.getenv("LOG_FILE", "app.log")
+LOG_MAX_BYTES = int(os.getenv("LOG_MAX_BYTES", 5 * 1024 * 1024))   # 5 MB
+LOG_BACKUP_COUNT = int(os.getenv("LOG_BACKUP_COUNT", 5))
 
 FOLDER_SCREENSHOT_PREFIX = os.getenv("FOLDER_SCREENSHOT_PREFIX", "screenshots")
 FOLDERS_TO_SAVE_SCREENSHOTS = ["resultados_examen"]
@@ -52,8 +57,13 @@ console_handler.setLevel(logging.DEBUG)
 console_handler.setFormatter(formatter)
 logger.addHandler(console_handler)
 
-#TODO: Rotate logs files to avoid filling up the disk, maybe with a max size of 5MB and keeping the last 5 files
-file_handler = logging.FileHandler("app.log", mode="a", encoding="utf-8")
+file_handler = RotatingFileHandler(
+    LOG_FILE,
+    mode="a",
+    maxBytes=LOG_MAX_BYTES,
+    backupCount=LOG_BACKUP_COUNT,
+    encoding="utf-8",
+)
 file_handler.setLevel(logging.WARNING)
 file_handler.setFormatter(formatter)
 logger.addHandler(file_handler)
@@ -106,6 +116,13 @@ for folder in CARPETAS_SCREENSHOTS:
     folder_path = os.path.join(FOLDER_SCREENSHOT_PREFIX, folder)
     if not os.path.exists(folder_path):
         os.makedirs(folder_path)
+    # purgar capturas antiguas para evitar que el volumen crezca sin límite
+    try:
+        eliminados = cleanup_old_files(folder_path, DIAS_RETENCION_SCREENSHOTS)
+        if eliminados:
+            logger.info(f"Limpieza de screenshots en '{folder_path}': {eliminados} ficheros eliminados")
+    except Exception as e:
+        logger.warning(f"No se pudo limpiar '{folder_path}': {e}")
 
 #Validate data JSON and create users if necessary
 try:
@@ -251,7 +268,7 @@ while True:
     
 
                 telegram_bot.update_funcionando()
-                time.sleep(int(TIEMPO_ENTRE_EXAMENES))
+                time.sleep(TIEMPO_ENTRE_EXAMENES)
 
         except ServiceDown as sd:
             sleep_time = TIEMPO_ESPERA_SERVICE_DOWN
