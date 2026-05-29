@@ -225,18 +225,22 @@ while True:
                 logger.info(f"Resultado obtenido para examen con NIF {datos_examen['nif']} y fecha de examen {datos_examen['fecha_examen_str']}: {result}")
                 
                 if isinstance(result, dict):
-                    result_text = result.get("text")
+                    result_text = (result.get("text") or "").strip()
                     result_screenshot_path = result.get("screenshot_path")
-                    if result_text not in ["APTO", "NO APTO"]:
-                        logger.critical("Probablemente no se ha guardado correctamente el resultado en DB porque el resultado no es alguno de los controlados")
 
-                    is_apto = "NO" not in result_text
-                    if is_apto:
+                    if result_text == "APTO":
                         db_manager.update_estado_examen(examen_id, EstadosEnum.APROBADO.value)
-                    else:
+                        telegram_bot.resultado(True, result_screenshot_path)
+                    elif result_text == "NO APTO":
                         db_manager.update_estado_examen(examen_id, EstadosEnum.SUSPENDIDO.value)
-                    
-                    telegram_bot.resultado(is_apto, result_screenshot_path)
+                        telegram_bot.resultado(False, result_screenshot_path)
+                    else:
+                        # texto inesperado: no escribimos estado en BBDD para que el examen se reintente
+                        logger.critical(f"Resultado inesperado para examen {examen_id}: '{result_text}'. No se actualiza estado.")
+                        sentry_sdk.capture_message(
+                            f"Texto de resultado inesperado: '{result_text}' para examen {examen_id}",
+                            level="error",
+                        )
                 elif isinstance(result, bool):
                     # si la fecha de examen lleva más de x días y no se obtiene resultados se marca el examen como caducado
                     exam_date = datetime.strptime(fecha_examen_str, "%d/%m/%Y").date()

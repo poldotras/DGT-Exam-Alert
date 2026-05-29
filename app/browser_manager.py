@@ -3,6 +3,11 @@ import time
 from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.options import Options
 from selenium import webdriver
+from selenium.common.exceptions import (
+    NoSuchElementException,
+    ElementNotInteractableException,
+    WebDriverException,
+)
 
 from errors.ServiceDown import ServiceDown
 from utils import generate_random_string
@@ -54,38 +59,33 @@ class BrowserManager:
         time.sleep(5)
 
     def fill_fields(self, datos_fields, max_attempts: int = 5):
-        intentos = 0
-
-        while intentos < max_attempts:
-            datos_rellenados= []
+        for intento in range(1, max_attempts + 1):
+            indices_rellenados = set()
             for i, value in enumerate(datos_fields):
-                if i not in datos_rellenados:
-                    try:
-                        self._driver.find_element(By.ID, IDS_DGT_WEBSITE[i]).send_keys(value)
-                    except Exception:
-                        # ignore individual field failures and try again
-                        pass
-                    else:
-                        datos_rellenados.append(IDS_DGT_WEBSITE[i])
-                    time.sleep(1)
+                # if i not in datos_rellenados: # TODO: Reviar si es necesario
+                try:
+                    self._driver.find_element(By.ID, IDS_DGT_WEBSITE[i]).send_keys(value)
+                    indices_rellenados.add(i)
+                except (NoSuchElementException, ElementNotInteractableException) as e:
+                    self._logger.debug(f"Campo {IDS_DGT_WEBSITE[i]} no disponible en intento {intento}: {e}")
+                time.sleep(1)
 
-            if len(datos_rellenados) == len(datos_fields):
-                break
+            if len(indices_rellenados) == len(datos_fields):
+                return
 
-            self._logger.info(f"Intento {intentos + 1} de {max_attempts} para llenar el formulario, campos completados: {len(datos_rellenados)}/{len(datos_fields)}")
+            self._logger.info(f"Intento {intento}/{max_attempts} para llenar el formulario, campos completados: {len(indices_rellenados)}/{len(datos_fields)}")
 
             try:
                 self._driver.find_element(By.XPATH, "//input[@title='Limpiar']").click()
                 time.sleep(1)
-            except Exception:
+            except (NoSuchElementException, WebDriverException):
                 if IS_DEBUG_MODE:
                     self._driver.save_screenshot(f"{FOLDER_SCREENSHOT_PREFIX}/.debug/fallos_fill_fields/{generate_random_string()}.png")
                 self.reset_website()
-            intentos += 1
-        if intentos >= max_attempts:
-            if IS_DEBUG_MODE:
-                self._driver.save_screenshot(f"{FOLDER_SCREENSHOT_PREFIX}/.debug/fallos_fill_fields_max_attempts/{generate_random_string()}.png")
-            raise Exception(f"No se pudieron llenar todos los campos después de {max_attempts} intentos")
+
+        if IS_DEBUG_MODE:
+            self._driver.save_screenshot(f"{FOLDER_SCREENSHOT_PREFIX}/.debug/fallos_fill_fields_max_attempts/{generate_random_string()}.png")
+        raise Exception(f"No se pudieron llenar todos los campos después de {max_attempts} intentos")
 
     def submit_form(self):
         self._driver.find_element(By.XPATH, "//input[@title='Buscar']").click()
@@ -119,15 +119,12 @@ class BrowserManager:
                     self._driver.save_screenshot(f"{FOLDER_SCREENSHOT_PREFIX}/.debug/webpage_msg_error/{generate_random_string()}.png")
                 raise Exception(f"Error encontrado: {msg_error}")
             
-            rate_limit_or_internal_error_page = self._driver.find_element(By.CLASS_NAME, "mensajeError")
-            
-            if rate_limit_or_internal_error_page and "operación solicitada no está disponible en estos momentos" in rate_limit_or_internal_error_page.text:
+            rate_limit_elements = self._driver.find_elements(By.CLASS_NAME, "mensajeError")
+            if rate_limit_elements and "operación solicitada no está disponible en estos momentos" in rate_limit_elements[0].text:
                 if IS_DEBUG_MODE:
                     self._driver.save_screenshot(f"{FOLDER_SCREENSHOT_PREFIX}/.debug/webpage_error/{generate_random_string()}.png")
                 raise ServiceDown()
-            
-            #TODO: SI FALLA TODO= REINTENTAR?(PRO si la web esta caida seguira reintentando pero si es solo esos datos se quedara pillado en ese examen)
-            # raise Exception("No se ha encontrado mensaje de error ni resultado") 
+            # ni resultado, ni msgError, ni mensajeError: la página aún no muestra nada relevante, seguimos polleando
         
         if IS_DEBUG_MODE:
             self._driver.save_screenshot(f"{FOLDER_SCREENSHOT_PREFIX}/.debug/webpage_error/{generate_random_string()}.png")
