@@ -1,3 +1,8 @@
 selenium
 python-telegram-bot
 asyncio
+sqlalchemy
+pymysql
+cryptography
+sentry-sdk
+debugpy  # needed for VS Code remote debugging

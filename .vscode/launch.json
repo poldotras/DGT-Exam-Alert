@@ -1,0 +1,30 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Python: Remote Attach (container)",
+            "type": "python",
+            "request": "attach",
+            "connect": {
+                "host": "localhost",
+                "port": 5678
+            },
+            "pathMappings": [
+                {
+                    "localRoot": "${workspaceFolder}/app",
+                    "remoteRoot": "/app"
+                }
+            ],
+            "justMyCode": true
+        },
+        {
+            "name": "Python: Debug main (local)",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/app/main.py",
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}/app",
+            "justMyCode": true
+        }
+    ]
+}

@@ -1,42 +1,55 @@
 import asyncio
 import telegram
+from logging import Logger
 from datetime import datetime
-import config
 
-token = config.telegram_bot_token
-chat_id = config.chat_id
-bot = telegram.Bot(token=token)
+class TelegramBot:
+    _bot = None
+    _chat_id = None
+    _logger = None
+    _status_message_id = None
 
-async def iniciado(hora_inicio):
-    await bot.send_message(text='Buscador de resultados iniciado', chat_id=chat_id)
-    await unpin()
-    await funcionando(hora_inicio)
-    await pin()
+    def __init__(self, token: str, chat_id: str, logger: Logger):
+        self._bot = telegram.Bot(token=token)
+        self._chat_id = chat_id
+        self._logger = logger
 
-async def resultado_msg():
-    await bot.send_message(text='¡Resultado del Examen encontrado!', chat_id=chat_id)
+        self._run_async(self._iniciado)
 
-async def resultado_imagen(pass_fail):
-    with open('resultado.png', 'rb') as photo:
-        await bot.send_photo(chat_id=chat_id, photo=photo, caption=f"Resultado:\n{pass_fail}")
-    print("\nFoto enviada correctamente")
+        self._logger.info("TelegramBot Iniciado")
+        
+    def _run_async(self, func, *args):
+        # Ejecuta la función asíncrona de manera síncrona
+        loop = asyncio.get_event_loop()
+        loop.run_until_complete(func(*args))
 
-async def update_funcionando(hora_actual):
-    await bot.edit_message_text(message_id=funcionando_msg.message_id, text=f'Última Búsqueda: {hora_actual}', chat_id=chat_id)
+    async def _iniciado(self):
+        await self._bot.send_message(text='DGT ALERT INICIADO', chat_id=self._chat_id)
+        await self._unpin()
+        await self._first_status_message()
+        await self._pin()
 
-async def funcionando(hora_actual):
-    global funcionando_msg
-    funcionando_msg = await bot.send_message(text=f'Última Búsqueda: {hora_actual}', chat_id=chat_id)
+    async def _first_status_message(self):
+        hora_actual = datetime.now().strftime('%H:%M:%S')
+        self._status_message_id = (await self._bot.send_message(text=f'Última Búsqueda: {hora_actual}', chat_id=self._chat_id)).message_id
 
-async def fin():
-    await bot.send_message(text='Programa Finalizado', chat_id=chat_id)
+    async def _pin(self):
+        await self._bot.pin_chat_message(chat_id=self._chat_id, message_id=self._status_message_id)
 
-async def pin():
-    await bot.pin_chat_message(chat_id=chat_id, message_id=funcionando_msg.message_id)
+    async def _unpin(self):
+        await self._bot.unpin_all_chat_messages(chat_id=self._chat_id)
 
-async def unpin():
-    await bot.unpin_all_chat_messages(chat_id=chat_id)
+    async def _resultado(self, is_apto, screenshot_path):
+        with open(screenshot_path, 'rb') as photo:
+            await self._bot.send_photo(chat_id=self._chat_id, photo=photo, caption=f"Resultado: <b>{'APROBADO' if is_apto else 'SUSPENDIDO'}</b> { '✅' if is_apto else '❌' }", parse_mode=telegram.constants.ParseMode.HTML)
+        self._logger.info("Foto enviada correctamente")
 
-# Para ejecutar una prueba o iniciar el flujo principal
-if __name__ == "__main__":
-    asyncio.run(iniciado(datetime.today().strftime('%H.%M')))
+    async def _update_funcionando(self):
+        hora_actual = datetime.now().strftime('%H:%M:%S')
+        await self._bot.edit_message_text(message_id=self._status_message_id, text=f'Última Búsqueda: {hora_actual}', chat_id=self._chat_id)
+
+    def resultado(self, is_apto, screenshot_path):
+        self._run_async(self._resultado, is_apto, screenshot_path)
+    
+    def update_funcionando(self):
+        self._run_async(self._update_funcionando)
