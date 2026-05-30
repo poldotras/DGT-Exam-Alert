@@ -1,37 +1,39 @@
 from typing import List, Dict
-from enums.estados_enum import EstadosEnum
 import os
 import random
 import string
 import time
 
-def fetch_datos_examenes(db_manager) -> List[Dict]:
+
+def fetch_exams_to_review(db_manager) -> List[Dict]:
     """Retrieve exams that need reviewing and serialize their data.
 
-    The caller should pass in the DatabaseManager instance so that the helper
-    remains free of the global variable from the main module.  Returned list
-    contains dictionaries with the following keys:
-      - "examen_id"         (int)
-      - "nif"               (str)
-      - "fecha_examen_str"  (str, formatted dd/MM/YYYY)
-      - "tipo"              (str)
-      - "fecha_nacimiento_str" (str)
+    The caller passes in the DatabaseManager instance so this helper stays
+    free of the global from the main module. Returned list contains dicts
+    with the following keys:
+      - "exam_id"        (int)
+      - "nif"            (str)
+      - "exam_date_str"  (str, formatted dd/MM/YYYY)
+      - "type"           (str)
+      - "birthdate_str"  (str)
     """
     raw = db_manager.get_examenes_a_revisar()
     serialized: List[Dict] = []
     for exam in raw:
-        # include id and fecha in serialization to allow state updates later
+        # include id and date in serialization to allow state updates later
         serialized.append({
-            "examen_id": exam.id,
+            "exam_id": exam.id,
             "nif": exam.persona.nif,
-            "fecha_examen_str": exam.fecha_examen.strftime("%d/%m/%Y"),
-            "tipo": exam.tipo_examen,
-            "fecha_nacimiento_str": exam.persona.fecha_nacimiento.strftime("%d/%m/%Y"),
+            "exam_date_str": exam.fecha_examen.strftime("%d/%m/%Y"),
+            "type": exam.tipo_examen,
+            "birthdate_str": exam.persona.fecha_nacimiento.strftime("%d/%m/%Y"),
         })
     return serialized
 
+
 def generate_random_string(length: int = 6) -> str:
     return ''.join(random.choices(string.ascii_letters + string.digits, k=length))
+
 
 def add_custom_filters_query(class_table, query, filters: dict):
     if not filters:
@@ -39,6 +41,7 @@ def add_custom_filters_query(class_table, query, filters: dict):
     for key, value in filters.items():
         query = query.filter(getattr(class_table, key) == value)
     return query
+
 
 def cleanup_old_files(folder_path: str, retention_days: int) -> int:
     """Remove files in `folder_path` whose mtime is older than `retention_days`.
@@ -58,6 +61,6 @@ def cleanup_old_files(folder_path: str, retention_days: int) -> int:
                 os.remove(full_path)
                 removed += 1
         except OSError:
-            # ignorar fallos por fichero individual (ej. permisos, race con escritura)
+            # ignore single-file failures (e.g. permissions, write race)
             continue
     return removed

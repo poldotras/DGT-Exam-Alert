@@ -3,6 +3,7 @@ import telegram
 from logging import Logger
 from datetime import datetime
 
+
 class TelegramBot:
     _bot = None
     _chat_id = None
@@ -14,42 +15,59 @@ class TelegramBot:
         self._chat_id = chat_id
         self._logger = logger
 
-        self._run_async(self._iniciado)
+        self._run_async(self._announce_start)
 
-        self._logger.info("TelegramBot Iniciado")
-        
+        self._logger.info("TelegramBot started")
+
     def _run_async(self, func, *args):
-        # Ejecuta la función asíncrona de manera síncrona
+        # Run the async function synchronously
         loop = asyncio.get_event_loop()
         loop.run_until_complete(func(*args))
 
-    async def _iniciado(self):
+    async def _announce_start(self):
+        # User-facing copy stays in Spanish on purpose (audience reads Spanish)
         await self._bot.send_message(text='DGT ALERT INICIADO', chat_id=self._chat_id)
-        await self._unpin()
-        await self._first_status_message()
-        await self._pin()
+        await self._unpin_all()
+        await self._send_initial_status_message()
+        await self._pin_status()
 
-    async def _first_status_message(self):
-        hora_actual = datetime.now().strftime('%H:%M:%S')
-        self._status_message_id = (await self._bot.send_message(text=f'Última Búsqueda: {hora_actual}', chat_id=self._chat_id)).message_id
+    async def _send_initial_status_message(self):
+        current_time = datetime.now().strftime('%H:%M:%S')
+        self._status_message_id = (
+            await self._bot.send_message(
+                text=f'Última Búsqueda: {current_time}',
+                chat_id=self._chat_id,
+            )
+        ).message_id
 
-    async def _pin(self):
+    async def _pin_status(self):
         await self._bot.pin_chat_message(chat_id=self._chat_id, message_id=self._status_message_id)
 
-    async def _unpin(self):
+    async def _unpin_all(self):
         await self._bot.unpin_all_chat_messages(chat_id=self._chat_id)
 
-    async def _resultado(self, is_apto, screenshot_path):
+    async def _send_result(self, is_approved, screenshot_path):
+        # User-facing copy stays in Spanish
         with open(screenshot_path, 'rb') as photo:
-            await self._bot.send_photo(chat_id=self._chat_id, photo=photo, caption=f"Resultado: <b>{'APROBADO' if is_apto else 'SUSPENDIDO'}</b> { '✅' if is_apto else '❌' }", parse_mode=telegram.constants.ParseMode.HTML)
-        self._logger.info("Foto enviada correctamente")
+            await self._bot.send_photo(
+                chat_id=self._chat_id,
+                photo=photo,
+                caption=f"Resultado: <b>{'APROBADO' if is_approved else 'SUSPENDIDO'}</b> "
+                        f"{ '✅' if is_approved else '❌' }",
+                parse_mode=telegram.constants.ParseMode.HTML,
+            )
+        self._logger.info("Photo sent successfully")
 
-    async def _update_funcionando(self):
-        hora_actual = datetime.now().strftime('%H:%M:%S')
-        await self._bot.edit_message_text(message_id=self._status_message_id, text=f'Última Búsqueda: {hora_actual}', chat_id=self._chat_id)
+    async def _update_alive_status(self):
+        current_time = datetime.now().strftime('%H:%M:%S')
+        await self._bot.edit_message_text(
+            message_id=self._status_message_id,
+            text=f'Última Búsqueda: {current_time}',
+            chat_id=self._chat_id,
+        )
 
-    def resultado(self, is_apto, screenshot_path):
-        self._run_async(self._resultado, is_apto, screenshot_path)
-    
-    def update_funcionando(self):
-        self._run_async(self._update_funcionando)
+    def send_result(self, is_approved, screenshot_path):
+        self._run_async(self._send_result, is_approved, screenshot_path)
+
+    def update_alive_status(self):
+        self._run_async(self._update_alive_status)

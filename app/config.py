@@ -42,14 +42,14 @@ def _env_bool(name: str, default: bool = False) -> bool:
 @dataclass(frozen=True)
 class Config:
     # Loop / business
-    tiempo_entre_examenes: int = field(default_factory=lambda: _env_int("TIEMPO_ENTRE_EXAMENES", 300))
-    tiempo_espera_service_down: int = field(default_factory=lambda: _env_int("TIEMPO_ESPERA_SERVICE_DOWN", 60))
-    dias_se_considera_caducado: int = field(default_factory=lambda: _env_int("DIAS_SE_CONSIDERA_CADUCADO", 7))
+    time_between_exams: int = field(default_factory=lambda: _env_int("TIEMPO_ENTRE_EXAMENES", 300))
+    service_down_wait_time: int = field(default_factory=lambda: _env_int("TIEMPO_ESPERA_SERVICE_DOWN", 60))
+    expired_after_days: int = field(default_factory=lambda: _env_int("DIAS_SE_CONSIDERA_CADUCADO", 7))
 
     # Selenium / browser
-    tiempo_maximo_espera_resultados: int = field(default_factory=lambda: _env_int("TIEMPO_MAXIMO_ESPERA_RESULTADOS", 300))
-    tiempo_espera_campo: int = field(default_factory=lambda: _env_int("TIEMPO_ESPERA_CAMPO", 5))
-    tiempo_espera_pagina: int = field(default_factory=lambda: _env_int("TIEMPO_ESPERA_PAGINA", 15))
+    max_result_wait_time: int = field(default_factory=lambda: _env_int("TIEMPO_MAXIMO_ESPERA_RESULTADOS", 300))
+    field_wait_time: int = field(default_factory=lambda: _env_int("TIEMPO_ESPERA_CAMPO", 5))
+    page_wait_time: int = field(default_factory=lambda: _env_int("TIEMPO_ESPERA_PAGINA", 15))
     poll_interval: int = field(default_factory=lambda: _env_int("POLL_INTERVAL", 2))
 
     # Logging
@@ -58,8 +58,8 @@ class Config:
     log_backup_count: int = field(default_factory=lambda: _env_int("LOG_BACKUP_COUNT", 5))
 
     # Screenshots
-    folder_screenshot_prefix: str = field(default_factory=lambda: _env_str("FOLDER_SCREENSHOT_PREFIX", "screenshots"))
-    dias_retencion_screenshots: int = field(default_factory=lambda: _env_int("DIAS_RETENCION_SCREENSHOTS", 30))
+    screenshot_folder_prefix: str = field(default_factory=lambda: _env_str("FOLDER_SCREENSHOT_PREFIX", "screenshots"))
+    screenshot_retention_days: int = field(default_factory=lambda: _env_int("DIAS_RETENCION_SCREENSHOTS", 30))
 
     # Modes
     is_debug_mode: bool = field(default_factory=lambda: _env_bool("DEBUG_APP", False))

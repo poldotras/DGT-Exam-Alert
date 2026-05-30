@@ -7,7 +7,7 @@ import time
 
 from logging import Logger
 from utils import add_custom_filters_query
-from enums.estados_enum import EstadosEnum
+from enums.status_enum import StatusEnum
 
 # declarative base shared by all models
 Base = declarative_base()
@@ -123,7 +123,7 @@ class DatabaseManager:
             query = add_custom_filters_query(Examen, query, filters)
             return query.all()
 
-    def create_examen(self, persona_id: int, fecha_examen: date, tipo_examen: str, estado_id: int = EstadosEnum.PENDIENTE.value):
+    def create_examen(self, persona_id: int, fecha_examen: date, tipo_examen: str, estado_id: int = StatusEnum.PENDING.value):
         with self.SessionLocal() as db:
             db_examen = Examen(persona_id=persona_id, fecha_examen=fecha_examen, tipo_examen=tipo_examen, estado_id=estado_id)
             db.add(db_examen)
@@ -154,12 +154,12 @@ class DatabaseManager:
             return None
 
     def get_examenes_a_revisar(self, filters: dict = None):
-        # return exams whose state is pending or reviewing and the date is today or earlier
-        # load the related persona eagerly so we don't hit DetachedInstanceError later
+        # return exams whose state is pending or reviewing and whose date is today or earlier
+        # load the related persona eagerly to avoid DetachedInstanceError later
         with self.SessionLocal() as db:
             query = db.query(Examen).options(joinedload(Examen.persona)).filter(
-                (Examen.estado_id == EstadosEnum.PENDIENTE.value) |
-                (Examen.estado_id == EstadosEnum.REVISANDO.value),
+                (Examen.estado_id == StatusEnum.PENDING.value) |
+                (Examen.estado_id == StatusEnum.REVIEWING.value),
                 Examen.fecha_examen <= date.today()
             )
             query = add_custom_filters_query(Examen, query, filters)
