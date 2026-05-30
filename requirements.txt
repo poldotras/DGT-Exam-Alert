@@ -5,4 +5,5 @@ sqlalchemy
 pymysql
 cryptography
 sentry-sdk
+pytz
 debugpy  # needed for VS Code remote debugging

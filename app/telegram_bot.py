@@ -1,7 +1,13 @@
 import asyncio
+import time
 import telegram
+from telegram.error import TimedOut, NetworkError
 from logging import Logger
-from datetime import datetime
+
+from utils import now_madrid
+
+
+MAX_TELEGRAM_RETRIES = 3
 
 
 class TelegramBot:
@@ -20,9 +26,27 @@ class TelegramBot:
         self._logger.info("TelegramBot started")
 
     def _run_async(self, func, *args):
-        # Run the async function synchronously
+        """Run an async Telegram call synchronously, retrying transient
+        network failures with exponential backoff. After MAX_TELEGRAM_RETRIES
+        attempts we log and swallow the failure so the main loop keeps going.
+        """
         loop = asyncio.get_event_loop()
-        loop.run_until_complete(func(*args))
+        last_exception = None
+        for attempt in range(1, MAX_TELEGRAM_RETRIES + 1):
+            try:
+                loop.run_until_complete(func(*args))
+                return
+            except (TimedOut, NetworkError) as e:
+                last_exception = e
+                wait = 2 ** (attempt - 1)  # 1s, 2s, 4s
+                self._logger.warning(
+                    f"Telegram network error on attempt {attempt}/{MAX_TELEGRAM_RETRIES} "
+                    f"calling {func.__name__}: {e}. Retrying in {wait}s"
+                )
+                time.sleep(wait)
+        self._logger.error(
+            f"Telegram call {func.__name__} failed after {MAX_TELEGRAM_RETRIES} attempts: {last_exception}"
+        )
 
     async def _announce_start(self):
         # User-facing copy stays in Spanish on purpose (audience reads Spanish)
@@ -32,7 +56,7 @@ class TelegramBot:
         await self._pin_status()
 
     async def _send_initial_status_message(self):
-        current_time = datetime.now().strftime('%H:%M:%S')
+        current_time = now_madrid().strftime('%H:%M:%S')
         self._status_message_id = (
             await self._bot.send_message(
                 text=f'Última Búsqueda: {current_time}',
@@ -59,7 +83,7 @@ class TelegramBot:
         self._logger.info("Photo sent successfully")
 
     async def _update_alive_status(self):
-        current_time = datetime.now().strftime('%H:%M:%S')
+        current_time = now_madrid().strftime('%H:%M:%S')
         await self._bot.edit_message_text(
             message_id=self._status_message_id,
             text=f'Última Búsqueda: {current_time}',

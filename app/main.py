@@ -1,5 +1,6 @@
 import time
 import os
+import re
 import traceback
 import json
 import logging
@@ -9,7 +10,7 @@ from logging.handlers import RotatingFileHandler
 import sentry_sdk
 
 from config import config
-from utils import fetch_exams_to_review, cleanup_old_files
+from utils import fetch_exams_to_review, cleanup_old_files, today_madrid
 from enums.status_enum import StatusEnum
 from errors.ServiceDown import ServiceDown
 
@@ -36,8 +37,11 @@ def setup_logger() -> logging.Logger:
     formatter = logging.Formatter(
         "{asctime} - {levelname} - {message}",
         style="{",
-        datefmt="%d-%m-%Y %H:%M:%S",
+        datefmt="%d-%m-%Y %H:%M:%S UTC",
     )
+    # Force UTC for log timestamps regardless of the container's TZ.
+    # User-facing displays (Telegram) convert to Europe/Madrid explicitly via now_madrid().
+    formatter.converter = time.gmtime
 
     console_handler = logging.StreamHandler()
     console_handler.setLevel(logging.DEBUG)
@@ -58,7 +62,10 @@ def setup_logger() -> logging.Logger:
     return logger
 
 
-def setup_sentry() -> None:
+def setup_sentry(logger: logging.Logger) -> None:
+    if not config.sentry_dsn:
+        logger.info("Sentry disabled (no DSN configured)")
+        return
     sentry_sdk.init(
         dsn=config.sentry_dsn,
         # Add data like request headers and IP for users,
@@ -128,8 +135,112 @@ def prepare_screenshot_folders(logger: logging.Logger) -> None:
             logger.warning(f"Could not clean '{folder_path}': {e}")
 
 
+# ---------------------------------------------------------------------------
+# personas.json validation
+#
+# Schema-as-data: each entry in PERSON_FIELD_VALIDATORS is a (key -> validator)
+# pair. A validator is a callable that takes the value and returns None on
+# success or a string describing the failure. The shape of the schema (keys,
+# validators) lives in one place; the loop in _validate_person_entry is dumb.
+# ---------------------------------------------------------------------------
+
+# Matches both Spanish NIFs (8 digits + letter) and NIEs (X/Y/Z + 7 digits + letter)
+NIF_PATTERN = re.compile(r"^[XYZ0-9]\d{7}[A-Z]$")
+
+
+def _check_date_str(label):
+    """Factory: returns a validator that accepts only 'dd/mm/yyyy' strings."""
+    def check(value):
+        if not isinstance(value, str):
+            return f"{label}: expected dd/mm/yyyy string, got {type(value).__name__}"
+        try:
+            datetime.strptime(value, "%d/%m/%Y")
+        except ValueError:
+            return f"{label}: invalid date '{value}' (expected dd/mm/yyyy)"
+        return None
+    return check
+
+
+def _check_non_empty_string(label):
+    """Factory: returns a validator that accepts only non-empty strings."""
+    def check(value):
+        if not isinstance(value, str):
+            return f"{label}: expected string, got {type(value).__name__}"
+        if not value.strip():
+            return f"{label}: empty string"
+        return None
+    return check
+
+
+def _check_nif(value):
+    if not isinstance(value, str):
+        return f"invalid NIF/NIE: expected string, got {type(value).__name__}"
+    if not NIF_PATTERN.match(value.strip().upper()):
+        return f"invalid NIF/NIE '{value}'"
+    return None
+
+
+def _check_exam_date_field(value):
+    """Polymorphic: accepts str (one date), dict {start, end}, or list of dates."""
+    if isinstance(value, str):
+        return _check_date_str("exam date")(value)
+    if isinstance(value, dict):
+        if "start" not in value or "end" not in value:
+            return "exam date dict missing 'start' or 'end'"
+        for sub_key in ("start", "end"):
+            err = _check_date_str(f"exam date {sub_key}")(value[sub_key])
+            if err:
+                return err
+        if datetime.strptime(value["start"], "%d/%m/%Y") > datetime.strptime(value["end"], "%d/%m/%Y"):
+            return f"exam date range: start ({value['start']}) is after end ({value['end']})"
+        return None
+    if isinstance(value, list):
+        for d in value:
+            err = _check_date_str("exam date list")(d)
+            if err:
+                return err
+        return None
+    return f"exam date: unexpected type {type(value).__name__}, expected str / dict / list"
+
+
+# The schema. Adding/removing a person field = editing this dict only.
+PERSON_FIELD_VALIDATORS = {
+    "nif": _check_nif,
+    "nombre": _check_non_empty_string("nombre"),
+    "carnet": _check_non_empty_string("carnet"),
+    "fecha_nacimiento": _check_date_str("fecha_nacimiento"),
+    "fecha_examen": _check_exam_date_field,
+}
+
+
+def _validate_person_entry(entry, idx: int, logger: logging.Logger) -> bool:
+    """Return True if the entry passes shape checks; logs and returns False otherwise.
+
+    Does not raise — invalid entries are skipped, the rest of personas.json continues.
+    """
+    if not isinstance(entry, dict):
+        logger.error(f"personas.json entry {idx}: not an object, got {type(entry).__name__}, skipping")
+        return False
+
+    missing = PERSON_FIELD_VALIDATORS.keys() - entry.keys()
+    if missing:
+        logger.error(f"personas.json entry {idx}: missing keys {sorted(missing)}, skipping")
+        return False
+
+    for key, validator in PERSON_FIELD_VALIDATORS.items():
+        err = validator(entry[key])
+        if err:
+            logger.error(f"personas.json entry {idx}: {err}, skipping")
+            return False
+
+    return True
+
+
 def _dates_from_field(exam_date_field):
-    """Normalise the polymorphic 'fecha_examen' JSON value into a list of date objects."""
+    """Normalise the polymorphic 'fecha_examen' JSON value into a list of date objects.
+
+    Assumes the field has already been validated by `_validate_person_entry`.
+    """
     if isinstance(exam_date_field, str):
         return [datetime.strptime(exam_date_field, "%d/%m/%Y").date()]
     if isinstance(exam_date_field, dict):
@@ -154,7 +265,17 @@ def seed_people(
         with open(json_path, "r") as file:
             json_input = json.loads(file.read())
 
-        for entry in json_input:
+        if not isinstance(json_input, list):
+            raise ValueError(f"personas.json root must be a list, got {type(json_input).__name__}")
+
+        valid_count = 0
+        skipped_count = 0
+        for idx, entry in enumerate(json_input):
+            if not _validate_person_entry(entry, idx, logger):
+                skipped_count += 1
+                continue
+            valid_count += 1
+
             license_type = entry.get("carnet")
             exam_date_field = entry.get("fecha_examen")
             nif = entry.get("nif")
@@ -196,6 +317,11 @@ def seed_people(
                     f"- Date: {date_to_add.strftime('%d/%m/%Y')} - {idx}/{len(dates_to_add)}"
                 )
 
+        if skipped_count:
+            logger.warning(
+                f"personas.json: {skipped_count} entries skipped due to validation errors "
+                f"(see previous logs); {valid_count} valid entries processed"
+            )
         logger.info("People and exams initialized successfully")
     except FileNotFoundError:
         logger.error(f"File {json_path} not found")
@@ -282,7 +408,7 @@ def process_exam(
         elif isinstance(result, bool):
             # if the exam date is older than N days and no result was found, mark as expired
             exam_date = datetime.strptime(exam_date_str, "%d/%m/%Y").date()
-            if (datetime.today().date() - exam_date).days > config.expired_after_days:
+            if (today_madrid() - exam_date).days > config.expired_after_days:
                 db_manager.update_estado_examen(exam_id, StatusEnum.REVIEWED_EXPIRED.value)
         else:
             raise Exception(f"Unexpected result: {result}")
@@ -322,7 +448,7 @@ def run_loop(
 
 def main() -> None:
     logger = setup_logger()
-    setup_sentry()
+    setup_sentry(logger)
 
     db_manager = init_db_manager(logger)
     browser_manager = BrowserManager(logger=logger, sentry_sdk=sentry_sdk)

@@ -1,8 +1,23 @@
 from typing import List, Dict
+from datetime import date, datetime
 import os
 import random
 import string
 import time
+
+import pytz
+
+MADRID_TZ = pytz.timezone("Europe/Madrid")
+
+
+def now_madrid() -> datetime:
+    """Return the current datetime in Europe/Madrid timezone (tz-aware)."""
+    return datetime.now(MADRID_TZ)
+
+
+def today_madrid() -> date:
+    """Return today's date in Europe/Madrid timezone."""
+    return now_madrid().date()
 
 
 def fetch_exams_to_review(db_manager) -> List[Dict]:
