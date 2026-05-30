@@ -27,6 +27,7 @@ def fetch_exams_to_review(db_manager) -> List[Dict]:
     free of the global from the main module. Returned list contains dicts
     with the following keys:
       - "exam_id"        (int)
+      - "persona_id"     (int)
       - "nif"            (str)
       - "exam_date_str"  (str, formatted dd/MM/YYYY)
       - "type"           (str)
@@ -38,6 +39,7 @@ def fetch_exams_to_review(db_manager) -> List[Dict]:
         # include id and date in serialization to allow state updates later
         serialized.append({
             "exam_id": exam.id,
+            "persona_id": exam.persona_id,
             "nif": exam.persona.nif,
             "exam_date_str": exam.fecha_examen.strftime("%d/%m/%Y"),
             "type": exam.tipo_examen,

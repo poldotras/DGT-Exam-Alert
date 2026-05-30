@@ -42,6 +42,23 @@ class Estado(Base):
 
     examenes = relationship("Examen", back_populates="estado")
 
+class Prueba(Base):
+    """Per-person prueba RESULT, scraped from the DGT 'ver todas' history or inferred.
+
+    `fecha` is NULL for inferred passes (earlier-in-pipeline / prerequisite carnets).
+    There can be several rows per (persona, carnet, prueba) — one per real attempt.
+    """
+    __tablename__ = "pruebas"
+
+    id = Column(Integer, primary_key=True, index=True)
+    persona_id = Column(Integer, ForeignKey("personas.id"), index=True, nullable=False)
+    carnet = Column(String(15), nullable=False)
+    prueba = Column(String(30), nullable=False)
+    fecha = Column(Date, nullable=True)
+    resultado = Column(String(10), nullable=False)  # "APTO" / "NO APTO" / "INFERIDO"
+
+    persona = relationship("Persona")
+
 class DatabaseManager:
     def __init__(self, host: str, database: str, user: str, password: str, logger: Logger, max_retries: int = 10, retry_delay: int = 2):
         """
@@ -134,7 +151,7 @@ class DatabaseManager:
     def get_estados(self):
         with self.SessionLocal() as db:
             return db.query(Estado).all()
-    
+
     def create_estado(self, nombre: str):
         with self.SessionLocal() as db:
             db_estado = Estado(nombre=nombre)
@@ -142,6 +159,37 @@ class DatabaseManager:
             db.commit()
             db.refresh(db_estado)
             return db_estado
+
+    def registrar_resultado_prueba(self, persona_id: int, carnet: str, prueba: str, fecha, resultado: str) -> bool:
+        """Insert a prueba result if not already present. Dedupe key is
+        (persona, carnet, prueba, fecha) so each real attempt is kept once and an
+        inferred (fecha NULL) row is not duplicated. Returns True if inserted.
+        """
+        with self.SessionLocal() as db:
+            exists = db.query(Prueba).filter(
+                Prueba.persona_id == persona_id,
+                Prueba.carnet == carnet,
+                Prueba.prueba == prueba,
+                Prueba.fecha == fecha,
+            ).first()
+            if exists:
+                return False
+            db.add(Prueba(persona_id=persona_id, carnet=carnet, prueba=prueba, fecha=fecha, resultado=resultado))
+            db.commit()
+            return True
+
+    def get_pruebas_aprobadas(self, persona_id: int) -> set:
+        """Return the set of (carnet, prueba) tuples the person has passed (APTO,
+        real or inferred). Carnet-scoped on purpose: an APTO of A1 'especifico' does
+        NOT satisfy C 'especifico' (different exam). teorico_comun equivalence is
+        handled by the caller treating it as global.
+        """
+        with self.SessionLocal() as db:
+            rows = db.query(Prueba.carnet, Prueba.prueba).filter(
+                Prueba.persona_id == persona_id,
+                Prueba.resultado == "APTO",
+            ).distinct().all()
+            return {(row[0], row[1]) for row in rows}
 
     def update_estado_examen(self, examen_id: int, new_estado_id: int):
         with self.SessionLocal() as db:
@@ -152,6 +200,37 @@ class DatabaseManager:
                 db.refresh(examen)
                 return examen
             return None
+
+    def _cancelar(self, db, query) -> int:
+        """Set CANCELLED on every Examen matched by `query` (already session-bound)."""
+        examenes = query.all()
+        for examen in examenes:
+            examen.estado_id = StatusEnum.CANCELLED.value
+        db.commit()
+        return len(examenes)
+
+    def cancelar_pendientes_de_carnet(self, persona_id: int, tipo_examen: str, excluir_examen_id: int = None) -> int:
+        """Cancel every still-open exam (pending/reviewing) of the person for a carnet.
+        Called when the whole carnet pipeline is complete.
+        """
+        with self.SessionLocal() as db:
+            query = db.query(Examen).filter(
+                Examen.persona_id == persona_id,
+                Examen.tipo_examen == tipo_examen,
+                Examen.estado_id.in_([StatusEnum.PENDING.value, StatusEnum.REVIEWING.value]),
+            )
+            if excluir_examen_id is not None:
+                query = query.filter(Examen.id != excluir_examen_id)
+            return self._cancelar(db, query)
+
+    def get_carnets_pendientes(self, persona_id: int) -> set:
+        """Distinct carnets (tipo_examen) the person still has pending/reviewing exams for."""
+        with self.SessionLocal() as db:
+            rows = db.query(Examen.tipo_examen).filter(
+                Examen.persona_id == persona_id,
+                Examen.estado_id.in_([StatusEnum.PENDING.value, StatusEnum.REVIEWING.value]),
+            ).distinct().all()
+            return {row[0] for row in rows}
 
     def get_examenes_a_revisar(self, filters: dict = None):
         # return exams whose state is pending or reviewing and whose date is today or earlier

@@ -11,8 +11,12 @@ import sentry_sdk
 
 from config import config
 from utils import fetch_exams_to_review, cleanup_old_files, today_madrid
-from enums.status_enum import StatusEnum
+from enums.status_enum import StatusEnum, STATUS_DB_NAMES
+from enums.carnet_enum import CarnetEnum
+from enums.prueba_enum import PruebaEnum
+from enums.resultado_enum import ResultadoEnum
 from errors.ServiceDown import ServiceDown
+import exam_pipeline
 
 from database_manager import DatabaseManager
 from browser_manager import BrowserManager
@@ -100,17 +104,16 @@ def init_db_manager(logger: logging.Logger) -> DatabaseManager:
 
 
 def seed_statuses(db_manager: DatabaseManager, logger: logging.Logger) -> None:
-    # TODO: Move this into a proper Seeder
-    # Note: status row names kept in Spanish to stay consistent with the existing DB rows
+    # Idempotent: insert only the status rows that are missing (names live in status_enum.py).
     try:
-        statuses = db_manager.get_estados()
-        if not statuses:
-            db_manager.create_estado("Pendiente")
-            db_manager.create_estado("Revisando")
-            db_manager.create_estado("Revisado/Caducado")
-            db_manager.create_estado("Aprobado")
-            db_manager.create_estado("Suspendido")
-            logger.info("Statuses created in the database")
+        existing_names = {s.nombre for s in db_manager.get_estados()}
+        created = 0
+        for _status_member, name in STATUS_DB_NAMES:
+            if name not in existing_names:
+                db_manager.create_estado(name)
+                created += 1
+        if created:
+            logger.info(f"Statuses seeded: {created} new row(s) created")
     except Exception as e:
         logger.error(f"Error initializing statuses: {str(e)}")
         sentry_sdk.capture_exception(e)
@@ -204,6 +207,7 @@ def _check_exam_date_field(value):
 
 
 # The schema. Adding/removing a person field = editing this dict only.
+# Note: NO 'prueba' — the prueba is discovered from the DGT result history, not the JSON.
 PERSON_FIELD_VALIDATORS = {
     "nif": _check_nif,
     "nombre": _check_non_empty_string("nombre"),
@@ -232,6 +236,14 @@ def _validate_person_entry(entry, idx: int, logger: logging.Logger) -> bool:
         if err:
             logger.error(f"personas.json entry {idx}: {err}, skipping")
             return False
+
+    # the carnet must be a valid DGT 'clase de permiso' code (else the form query is invalid)
+    if not CarnetEnum.is_valid(entry["carnet"]):
+        logger.error(
+            f"personas.json entry {idx}: invalid carnet '{entry['carnet']}' "
+            f"(not a DGT clase de permiso code), skipping"
+        )
+        return False
 
     return True
 
@@ -276,6 +288,7 @@ def seed_people(
                 continue
             valid_count += 1
 
+            # carnet is stored exactly as written in personas.json (must be an official DGT code)
             license_type = entry.get("carnet")
             exam_date_field = entry.get("fecha_examen")
             nif = entry.get("nif")
@@ -292,7 +305,7 @@ def seed_people(
                     fecha_nacimiento=birthdate,
                 )
 
-            # fetch the person's existing exams so we can avoid inserting duplicates
+            # dedupe the polling queue by (carnet, date)
             existing_exams_query = db_manager.get_examenes_by_persona_id(
                 person_db.id,
                 {"tipo_examen": license_type},
@@ -303,18 +316,18 @@ def seed_people(
             dates_to_add = sorted(candidate_dates - existing_exams)
 
             logger.info(
-                f"Processing {person_db.nombre} - Type: {license_type} "
+                f"Processing {person_db.nombre} - Carnet: {license_type} "
                 f"- Dates to add: {len(dates_to_add)}"
             )
-            for idx, date_to_add in enumerate(dates_to_add, start=1):
+            for position, date_to_add in enumerate(dates_to_add, start=1):
                 db_manager.create_examen(
                     persona_id=person_db.id,
                     fecha_examen=date_to_add,
                     tipo_examen=license_type,
                 )
                 logger.info(
-                    f"Added exam for {person_db.nombre} - Type: {license_type} "
-                    f"- Date: {date_to_add.strftime('%d/%m/%Y')} - {idx}/{len(dates_to_add)}"
+                    f"Added exam for {person_db.nombre} - Carnet: {license_type} "
+                    f"- Date: {date_to_add.strftime('%d/%m/%Y')} - {position}/{len(dates_to_add)}"
                 )
 
         if skipped_count:
@@ -337,31 +350,113 @@ def seed_people(
         raise
 
 
-def _handle_dict_result(
-    exam_id: int,
+def _aprobadas_enums(persona_id: int, db_manager: DatabaseManager) -> set:
+    """Read the person's passed (carnet, prueba) from the DB and lift them to enums."""
+    return {
+        (CarnetEnum(c), PruebaEnum(p))
+        for (c, p) in db_manager.get_pruebas_aprobadas(persona_id)
+    }
+
+
+def _register_history(persona_id: int, history: list, db_manager: DatabaseManager, logger: logging.Logger) -> None:
+    """Persist every parsed prueba row. The TIPO DE PRUEBA, CLASE DE PERMISO and CALIFICACIÓN
+    are parsed into enums; any value we don't contemplate RAISES (fails loud → Sentry).
+    """
+    for row in history:
+        prueba = exam_pipeline.parse_tipo_prueba(row.get("tipo"))          # raises if unknown
+        resultado = ResultadoEnum.from_dgt(row.get("calificacion"))        # raises if unknown
+        carnet = CarnetEnum.from_dgt((row.get("carnet") or "").strip())    # raises if unknown
+
+        fecha = None
+        fecha_raw = (row.get("fecha") or "").strip()
+        if fecha_raw:
+            try:
+                fecha = datetime.strptime(fecha_raw, "%d/%m/%Y").date()
+            except ValueError:
+                logger.warning(f"Unparseable FECHA '{fecha_raw}' for {carnet.value}/{prueba.value}; storing without date")
+
+        if db_manager.registrar_resultado_prueba(persona_id, carnet.value, prueba.value, fecha, resultado.value):
+            logger.info(f"Registered prueba {carnet.value}/{prueba.value} {fecha_raw or '(sin fecha)'} -> {resultado.value}")
+
+
+def _register_inferred(persona_id: int, db_manager: DatabaseManager, logger: logging.Logger) -> None:
+    """Derive and persist implied passes (earlier-in-pipeline + prerequisite carnets)
+    as APTO rows with no date, based on what's really recorded so far.
+    """
+    implied = exam_pipeline.infer_implied_passes(_aprobadas_enums(persona_id, db_manager))
+    for carnet, prueba in sorted(implied, key=lambda e: (e[0].value, e[1].value)):
+        if db_manager.registrar_resultado_prueba(persona_id, carnet.value, prueba.value, None, ResultadoEnum.APTO.value):
+            logger.info(f"Inferred pass {carnet.value}/{prueba.value} (sin fecha)")
+
+
+def _reconcile_completed_carnets(persona_id: int, db_manager: DatabaseManager, logger: logging.Logger) -> None:
+    """For each carnet the person still has pending exams in, cancel them all if its
+    pipeline is now complete (real + inferred passes).
+    """
+    aprobadas = _aprobadas_enums(persona_id, db_manager)
+    for carnet_code in db_manager.get_carnets_pendientes(persona_id):
+        carnet = CarnetEnum(carnet_code)  # examenes carnets were validated at seed time
+        if exam_pipeline.is_carnet_complete(carnet, aprobadas):
+            cancelled = db_manager.cancelar_pendientes_de_carnet(persona_id, carnet_code)
+            logger.info(
+                f"Carnet '{carnet_code}' COMPLETE for persona {persona_id}: "
+                f"cancelled {cancelled} remaining pending exam(s)"
+            )
+
+
+def _result_for_examen(history: list, carnet: str, exam_date_str: str):
+    """Find the parsed row matching the queried (carnet, date). Returns a ResultadoEnum
+    (raises on an unrecognised CALIFICACIÓN) or None if no row matches.
+    """
+    for row in history:
+        if ((row.get("carnet") or "").strip() == carnet
+                and (row.get("fecha") or "").strip() == exam_date_str):
+            return ResultadoEnum.from_dgt(row.get("calificacion"))
+    return None
+
+
+def _handle_result(
+    exam_data: dict,
     result: dict,
     db_manager: DatabaseManager,
     telegram_bot: TelegramBot,
     logger: logging.Logger,
 ) -> None:
-    result_text = (result.get("text") or "").strip()
-    result_screenshot_path = result.get("screenshot_path")
+    """Register the full scraped history, infer implied passes, set this exam's state,
+    notify Telegram, and cancel any carnet whose pipeline is now complete.
+    """
+    exam_id = exam_data["exam_id"]
+    persona_id = exam_data["persona_id"]
+    carnet = exam_data["type"]
+    exam_date_str = exam_data["exam_date_str"]
+    history = result.get("history", [])
+    screenshot_path = result.get("screenshot_path")
 
-    if result_text == "APTO":
+    _register_history(persona_id, history, db_manager, logger)
+    _register_inferred(persona_id, db_manager, logger)
+
+    # this exam's own result (match by carnet + date in the parsed history)
+    my_result = _result_for_examen(history, carnet, exam_date_str)
+    if my_result == ResultadoEnum.APTO:
         db_manager.update_estado_examen(exam_id, StatusEnum.APPROVED.value)
-        telegram_bot.send_result(True, result_screenshot_path)
-    elif result_text == "NO APTO":
+        telegram_bot.send_result(True, screenshot_path)
+    elif my_result == ResultadoEnum.NO_APTO:
         db_manager.update_estado_examen(exam_id, StatusEnum.FAILED.value)
-        telegram_bot.send_result(False, result_screenshot_path)
+        telegram_bot.send_result(False, screenshot_path)
     else:
-        # unexpected text: do not update the DB so the exam gets retried next loop
+        # queried exam not found in the parsed history — unexpected, leave for retry
         logger.critical(
-            f"Unexpected result for exam {exam_id}: '{result_text}'. State not updated."
+            f"Exam {exam_id}: queried result ({carnet} {exam_date_str}) not found in parsed "
+            f"history ({len(history)} rows). State not updated."
         )
         sentry_sdk.capture_message(
-            f"Unexpected result text: '{result_text}' for exam {exam_id}",
+            f"Queried exam result not found in DGT history: {carnet} {exam_date_str}",
             level="error",
         )
+
+    # cancel any carnet that is now fully complete (covers this carnet and any others
+    # the registered history may have completed)
+    _reconcile_completed_carnets(persona_id, db_manager, logger)
 
 
 def process_exam(
@@ -395,23 +490,21 @@ def process_exam(
         browser_manager.submit_form()
         result = browser_manager.get_result()
 
-        if result is None:
-            return
-
-        logger.info(
-            f"Result obtained for exam with NIF {exam_data['nif']} "
-            f"and exam date {exam_date_str}: {result}"
-        )
-
-        if isinstance(result, dict):
-            _handle_dict_result(exam_id, result, db_manager, telegram_bot, logger)
-        elif isinstance(result, bool):
-            # if the exam date is older than N days and no result was found, mark as expired
+        if result is False:
+            # no record on the DGT yet; if the exam date is old enough, mark expired
             exam_date = datetime.strptime(exam_date_str, "%d/%m/%Y").date()
             if (today_madrid() - exam_date).days > config.expired_after_days:
                 db_manager.update_estado_examen(exam_id, StatusEnum.REVIEWED_EXPIRED.value)
-        else:
-            raise Exception(f"Unexpected result: {result}")
+            return
+
+        if not isinstance(result, dict):
+            raise Exception(f"Unexpected result type from get_result: {result!r}")
+
+        logger.info(
+            f"Result obtained for NIF {exam_data['nif']} {exam_data['type']} {exam_date_str}: "
+            f"{len(result.get('history', []))} prueba row(s) in history"
+        )
+        _handle_result(exam_data, result, db_manager, telegram_bot, logger)
 
         telegram_bot.update_alive_status()
         time.sleep(config.time_between_exams)

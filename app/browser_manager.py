@@ -1,6 +1,6 @@
 from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support.ui import WebDriverWait, Select
 from selenium.webdriver.support import expected_conditions as EC
 from selenium import webdriver
 from selenium.common.exceptions import (
@@ -21,8 +21,20 @@ DGT_FORM_FIELD_IDS = [
     "formularioBusquedaNotas:clasepermiso",
     "formularioBusquedaNotas:fechaNacimiento",
 ]
+# clasepermiso is a <select>; it must be set by option value, not send_keys
+CLASEPERMISO_ID = "formularioBusquedaNotas:clasepermiso"
 
 RESULT_ID = "formularioResultadoNotas:j_id38:0:j_id70"
+# Per-row field id suffixes inside the repeater formularioResultadoNotas:j_id38:<N>:<suffix>
+ROW_ID_PREFIX = "formularioResultadoNotas:j_id38"
+ROW_FIELD_CARNET = "j_id46"        # CLASE DE PERMISO
+ROW_FIELD_TIPO = "j_id54"          # TIPO DE PRUEBA
+ROW_FIELD_FECHA = "j_id62"         # FECHA DE EXAMEN
+ROW_FIELD_CALIF = "j_id70"         # CALIFICACIÓN EXAMEN
+# Button (by name) that expands the page to show ALL past pruebas
+VER_TODAS_BUTTON_NAME = "formularioResultadoNotas:j_id180"
+MAX_HISTORY_ROWS = 100             # safety cap when iterating the repeater
+
 # Strings the DGT page renders verbatim in Spanish — these are external contracts, do not translate
 RATE_LIMIT_TEXT = "operación solicitada no está disponible en estos momentos"
 NO_RECORD_TEXT = "No hay ningún registro para los datos introducidos"
@@ -97,18 +109,29 @@ class BrowserManager:
                 )
             raise Exception("The DGT site did not load the form within the expected time")
 
+    def _set_field(self, field_id, value):
+        """Fill a single form field, waiting for it to be interactable. The clasepermiso
+        <select> is set by option value (the official DGT code); the rest via send_keys.
+        """
+        element = WebDriverWait(self._driver, config.field_wait_time).until(
+            EC.element_to_be_clickable((By.ID, field_id))
+        )
+        if field_id == CLASEPERMISO_ID:
+            Select(element).select_by_value(value)
+        else:
+            element.send_keys(value)
+
     def fill_fields(self, form_fields, max_attempts: int = 5):
         for attempt in range(1, max_attempts + 1):
             filled_indices = set()
             for i, value in enumerate(form_fields):
                 # if i not in datos_rellenados: # TODO: Reviar si es necesario
                 try:
-                    element = WebDriverWait(self._driver, config.field_wait_time).until(
-                        EC.element_to_be_clickable((By.ID, DGT_FORM_FIELD_IDS[i]))
-                    )
-                    element.send_keys(value)
+                    self._set_field(DGT_FORM_FIELD_IDS[i], value)
                     filled_indices.add(i)
                 except (TimeoutException, NoSuchElementException, ElementNotInteractableException) as e:
+                    # NoSuchElementException also covers Select.select_by_value with an unknown
+                    # option value. A dead-driver WebDriverException intentionally propagates.
                     self._logger.debug(f"Field {DGT_FORM_FIELD_IDS[i]} unavailable on attempt {attempt}: {e}")
 
             if len(filled_indices) == len(form_fields):
@@ -192,19 +215,23 @@ class BrowserManager:
             raise Exception("Maximum wait time exceeded without a result or error message")
 
         if kind == "result":
-            # wait for the result text to materialise before capturing the screenshot
+            # wait for the result text to materialise before doing anything
             try:
                 WebDriverWait(self._driver, 5).until(
                     lambda d: d.find_element(By.ID, RESULT_ID).text.strip() != ""
                 )
             except TimeoutException:
-                self._logger.warning("Result text empty after wait; capturing anyway")
+                self._logger.warning("Result text empty after wait; continuing anyway")
 
+            # screenshot the queried result FIRST, before expanding to the full history
             screenshot_path = f"{config.screenshot_folder_prefix}/resultados_examen/{generate_random_string()}.png"
             self._driver.save_screenshot(screenshot_path)
+
+            # then expand ("ver todas las pruebas") and parse every prueba in the history
+            self._expand_full_history()
             return {
-                "text": element.text,
                 "screenshot_path": screenshot_path,
+                "history": self._parse_history(),
             }
 
         if kind == "msg_error":
@@ -227,3 +254,44 @@ class BrowserManager:
 
         # should never get here: the closure only returns the three kinds above
         raise Exception(f"Unknown kind after WebDriverWait: {kind!r}")
+
+    def _expand_full_history(self):
+        """Click the 'ver todas las pruebas' button if present so the page reloads with
+        the full history. No-op if the button isn't there (single-prueba result).
+        """
+        buttons = self._driver.find_elements(By.NAME, VER_TODAS_BUTTON_NAME)
+        if not buttons:
+            return
+        try:
+            buttons[0].click()
+            # the JSF postback reloads the page; wait until a second row appears (or give up)
+            WebDriverWait(self._driver, config.field_wait_time).until(
+                lambda d: len(d.find_elements(By.ID, f"{ROW_ID_PREFIX}:1:{ROW_FIELD_CARNET}")) > 0
+            )
+        except TimeoutException:
+            # only one prueba in history, or reload slow — parse whatever is there
+            self._logger.debug("'ver todas' did not add more rows within the wait")
+        except WebDriverException as e:
+            self._logger.warning(f"Could not expand full prueba history: {e}")
+
+    def _parse_history(self):
+        """Parse every prueba row in the repeater into a list of raw dicts:
+        {carnet, tipo, fecha, calificacion}. Stops at the first missing row.
+        """
+        history = []
+        for n in range(MAX_HISTORY_ROWS):
+            carnet_els = self._driver.find_elements(By.ID, f"{ROW_ID_PREFIX}:{n}:{ROW_FIELD_CARNET}")
+            if not carnet_els:
+                break
+
+            def _text(suffix):
+                els = self._driver.find_elements(By.ID, f"{ROW_ID_PREFIX}:{n}:{suffix}")
+                return els[0].text.strip() if els else ""
+
+            history.append({
+                "carnet": carnet_els[0].text.strip(),
+                "tipo": _text(ROW_FIELD_TIPO),
+                "fecha": _text(ROW_FIELD_FECHA),
+                "calificacion": _text(ROW_FIELD_CALIF),
+            })
+        return history
