@@ -422,8 +422,11 @@ def _handle_result(
     telegram_bot: TelegramBot,
     logger: logging.Logger,
 ) -> None:
-    """Register the full scraped history, infer implied passes, set this exam's state,
-    notify Telegram, and cancel any carnet whose pipeline is now complete.
+    """Notify this exam's result, then register the full scraped history, infer implied
+    passes and cancel any carnet whose pipeline is now complete.
+
+    The notification comes FIRST and the full-history processing is isolated: an unknown
+    label while re-parsing the history must never block the notification of a valid result.
     """
     exam_id = exam_data["exam_id"]
     persona_id = exam_data["persona_id"]
@@ -432,10 +435,8 @@ def _handle_result(
     history = result.get("history", [])
     screenshot_path = result.get("screenshot_path")
 
-    _register_history(persona_id, history, db_manager, logger)
-    _register_inferred(persona_id, db_manager, logger)
-
-    # this exam's own result (match by carnet + date in the parsed history)
+    # 1) This exam's own result (match by carnet + date in the in-memory history). Parses
+    #    only the queried row — independent of the rest of the history.
     my_result = _result_for_examen(history, carnet, exam_date_str)
     if my_result == ResultadoEnum.APTO:
         db_manager.update_estado_examen(exam_id, StatusEnum.APPROVED.value)
@@ -454,9 +455,18 @@ def _handle_result(
             level="error",
         )
 
-    # cancel any carnet that is now fully complete (covers this carnet and any others
-    # the registered history may have completed)
-    _reconcile_completed_carnets(persona_id, db_manager, logger)
+    # 2) Register the full history + inference + cancellation. Isolated: any unknown label
+    #    here fails loud (Sentry) but does NOT undo the notification above nor break the loop.
+    try:
+        _register_history(persona_id, history, db_manager, logger)
+        _register_inferred(persona_id, db_manager, logger)
+        _reconcile_completed_carnets(persona_id, db_manager, logger)
+    except Exception as e:
+        logger.error(
+            f"Failed to register/reconcile full prueba history for persona {persona_id}: {e}",
+            exc_info=e,
+        )
+        sentry_sdk.capture_exception(e)
 
 
 def process_exam(
