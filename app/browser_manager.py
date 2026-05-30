@@ -50,6 +50,9 @@ class BrowserManager:
         # implicit_wait still active for singular find_element calls in the form flow;
         # the plural find_elements used in get_result polling return [] instantly anyway.
         driver.implicitly_wait(2)
+        # Abort a hanging navigation before Selenium's 120s client read timeout fires,
+        # so we get a clean TimeoutException instead of a raw ReadTimeoutError.
+        driver.set_page_load_timeout(config.page_load_timeout)
         return driver
 
     def _is_session_alive(self):
@@ -74,7 +77,14 @@ class BrowserManager:
     def reset_website(self):
         """Navigate to the DGT website and wait for the form to be ready."""
         self._ensure_driver()
-        self._driver.get(URL)
+        # driver.get() can hang if the DGT site is slow/down; set_page_load_timeout makes it
+        # raise TimeoutException instead. Treat that as a transient outage (ServiceDown) so the
+        # main loop backs off and retries rather than spamming Sentry (see DGT-ALERT-1W).
+        try:
+            self._driver.get(URL)
+        except TimeoutException:
+            self._logger.warning("Timed out loading the DGT site (page load timeout)")
+            raise ServiceDown()
         # wait for the first form field to be present instead of a blind sleep
         try:
             WebDriverWait(self._driver, config.page_wait_time).until(
@@ -128,9 +138,18 @@ class BrowserManager:
         raise Exception(f"Could not fill all fields after {max_attempts} attempts")
 
     def submit_form(self):
-        WebDriverWait(self._driver, config.field_wait_time).until(
-            EC.element_to_be_clickable((By.XPATH, "//input[@title='Buscar']"))
-        ).click()
+        # The click submits the form (a navigation). Like reset_website, it can hit the
+        # page load timeout if the DGT backend stalls (see DGT-ALERT-1T) — treat as ServiceDown.
+        try:
+            WebDriverWait(self._driver, config.field_wait_time).until(
+                EC.element_to_be_clickable((By.XPATH, "//input[@title='Buscar']"))
+            ).click()
+        except TimeoutException as e:
+            # Distinguish the two TimeoutException sources: the WebDriverWait (button never
+            # clickable) vs the page-load timeout from the navigation the click triggers.
+            # Both mean the site isn't responding usefully; back off via ServiceDown.
+            self._logger.warning(f"Timed out submitting the search form: {e}")
+            raise ServiceDown()
 
     @staticmethod
     def _wait_for_result_or_error(driver):

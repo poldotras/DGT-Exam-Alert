@@ -50,6 +50,10 @@ class Config:
     max_result_wait_time: int = field(default_factory=lambda: _env_int("TIEMPO_MAXIMO_ESPERA_RESULTADOS", 300))
     field_wait_time: int = field(default_factory=lambda: _env_int("TIEMPO_ESPERA_CAMPO", 5))
     page_wait_time: int = field(default_factory=lambda: _env_int("TIEMPO_ESPERA_PAGINA", 15))
+    # Hard cap for driver.get()/navigation. Must stay below Selenium's 120s client read
+    # timeout so chromedriver aborts the page load first and raises a clean TimeoutException
+    # instead of a raw urllib3 ReadTimeoutError (see Sentry DGT-ALERT-1W/1T/1V).
+    page_load_timeout: int = field(default_factory=lambda: _env_int("TIEMPO_CARGA_PAGINA", 60))
     poll_interval: int = field(default_factory=lambda: _env_int("POLL_INTERVAL", 2))
 
     # Logging
