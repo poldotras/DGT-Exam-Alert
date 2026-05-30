@@ -1,5 +1,4 @@
 import os
-import time
 from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.support.ui import WebDriverWait
@@ -22,6 +21,10 @@ IDS_DGT_WEBSITE = [
     "formularioBusquedaNotas:clasepermiso",
     "formularioBusquedaNotas:fechaNacimiento",
 ]
+
+RESULT_ID = "formularioResultadoNotas:j_id38:0:j_id70"
+RATE_LIMIT_TEXT = "operación solicitada no está disponible en estos momentos"
+NO_RECORD_TEXT = "No hay ningún registro para los datos introducidos"
 
 URL = "https://sedeclave.dgt.gob.es/WEB_NOTP_CONSULTA/consultaNota.faces"
 
@@ -136,55 +139,79 @@ class BrowserManager:
             EC.element_to_be_clickable((By.XPATH, "//input[@title='Buscar']"))
         ).click()
 
+    @staticmethod
+    def _wait_for_result_or_error(driver):
+        """WebDriverWait callable: returns (kind, element) when the page is ready,
+        or False to keep polling.
+
+        Kinds:
+          - "result"     → el resultado del examen está disponible
+          - "msg_error"  → mensaje de error (incluye "no hay registro")
+          - "rate_limit" → SOLO cuando el texto coincide con el de servicio caído;
+                           otros textos en .mensajeError se ignoran y seguimos polleando
+        """
+        resultado = driver.find_elements(By.ID, RESULT_ID)
+        if resultado:
+            return ("result", resultado[0])
+
+        msg_error = driver.find_elements(By.CLASS_NAME, "msgError")
+        if msg_error:
+            return ("msg_error", msg_error[0])
+
+        rate_limit = driver.find_elements(By.CLASS_NAME, "mensajeError")
+        if rate_limit and RATE_LIMIT_TEXT in rate_limit[0].text:
+            return ("rate_limit", rate_limit[0])
+
+        return False
+
     def get_result(self):
-        """Poll until the page shows a result, an error, or the timeout is hit."""
-        t1 = time.time()
+        """Wait until the page shows a result, an error, or the timeout is hit."""
+        try:
+            kind, element = WebDriverWait(
+                self._driver,
+                TIEMPO_MAXIMO_ESPERA_RESULTADOS,
+                poll_frequency=POLL_INTERVAL,
+            ).until(self._wait_for_result_or_error)
+        except TimeoutException:
+            if IS_DEBUG_MODE:
+                self._driver.save_screenshot(
+                    f"{FOLDER_SCREENSHOT_PREFIX}/.debug/webpage_error/{generate_random_string()}.png"
+                )
+            raise Exception("Tiempo máximo de espera superado sin obtener resultado ni mensaje de error")
 
-        while (time.time() - t1) < TIEMPO_MAXIMO_ESPERA_RESULTADOS:
-            resultado_elements = self._driver.find_elements(By.ID, "formularioResultadoNotas:j_id38:0:j_id70")
-            if resultado_elements:
-                # esperar a que el texto del resultado se materialice antes de capturar
-                try:
-                    WebDriverWait(self._driver, 5).until(
-                        lambda d: d.find_element(
-                            By.ID, "formularioResultadoNotas:j_id38:0:j_id70"
-                        ).text.strip() != ""
-                    )
-                except TimeoutException:
-                    self._logger.warning("Texto de resultado vacío tras espera; capturando igualmente")
+        if kind == "result":
+            # esperar a que el texto del resultado se materialice antes de capturar
+            try:
+                WebDriverWait(self._driver, 5).until(
+                    lambda d: d.find_element(By.ID, RESULT_ID).text.strip() != ""
+                )
+            except TimeoutException:
+                self._logger.warning("Texto de resultado vacío tras espera; capturando igualmente")
 
-                screenshot_path = f"{FOLDER_SCREENSHOT_PREFIX}/resultados_examen/{generate_random_string()}.png"
-                self._driver.save_screenshot(screenshot_path)
-                return {
-                    "text": resultado_elements[0].text,
-                    "screenshot_path": screenshot_path,
-                }
+            screenshot_path = f"{FOLDER_SCREENSHOT_PREFIX}/resultados_examen/{generate_random_string()}.png"
+            self._driver.save_screenshot(screenshot_path)
+            return {
+                "text": element.text,
+                "screenshot_path": screenshot_path,
+            }
 
-            msg_error_elements = self._driver.find_elements(By.CLASS_NAME, "msgError")
-            if msg_error_elements:
-                msg_error = msg_error_elements[0].text
-                if "No hay ningún registro para los datos introducidos" in msg_error:
-                    return False
+        if kind == "msg_error":
+            msg_error_text = element.text
+            if NO_RECORD_TEXT in msg_error_text:
+                return False
 
-                if IS_DEBUG_MODE:
-                    self._driver.save_screenshot(
-                        f"{FOLDER_SCREENSHOT_PREFIX}/.debug/webpage_msg_error/{generate_random_string()}.png"
-                    )
-                raise Exception(f"Error encontrado: {msg_error}")
+            if IS_DEBUG_MODE:
+                self._driver.save_screenshot(
+                    f"{FOLDER_SCREENSHOT_PREFIX}/.debug/webpage_msg_error/{generate_random_string()}.png"
+                )
+            raise Exception(f"Error encontrado: {msg_error_text}")
 
-            rate_limit_elements = self._driver.find_elements(By.CLASS_NAME, "mensajeError")
-            if rate_limit_elements and "operación solicitada no está disponible en estos momentos" in rate_limit_elements[0].text:
-                if IS_DEBUG_MODE:
-                    self._driver.save_screenshot(
-                        f"{FOLDER_SCREENSHOT_PREFIX}/.debug/webpage_error/{generate_random_string()}.png"
-                    )
-                raise ServiceDown()
+        if kind == "rate_limit":
+            if IS_DEBUG_MODE:
+                self._driver.save_screenshot(
+                    f"{FOLDER_SCREENSHOT_PREFIX}/.debug/webpage_error/{generate_random_string()}.png"
+                )
+            raise ServiceDown()
 
-            # ni resultado, ni msgError, ni mensajeError: la página aún no muestra nada relevante, seguimos polleando
-            time.sleep(POLL_INTERVAL)
-
-        if IS_DEBUG_MODE:
-            self._driver.save_screenshot(
-                f"{FOLDER_SCREENSHOT_PREFIX}/.debug/webpage_error/{generate_random_string()}.png"
-            )
-        raise Exception("Tiempo máximo de espera superado sin obtener resultado ni mensaje de error")
+        # nunca debería llegar aquí: el closure sólo devuelve los tres kinds de arriba
+        raise Exception(f"kind desconocido tras WebDriverWait: {kind!r}")
