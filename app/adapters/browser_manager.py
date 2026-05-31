@@ -12,8 +12,8 @@ from selenium.common.exceptions import (
 )
 
 from config import config
-from errors.ServiceDown import ServiceDown
-from utils import generate_random_string
+from domain.errors import ServiceDown
+from utils.fileutils import generate_random_string
 
 DGT_FORM_FIELD_IDS = [
     "formularioBusquedaNotas:nifnie",

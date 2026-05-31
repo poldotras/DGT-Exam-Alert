@@ -1,63 +1,22 @@
-from sqlalchemy import create_engine, Column, Integer, String, Date, ForeignKey
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker, relationship, joinedload
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker, joinedload
 from sqlalchemy.exc import OperationalError
 from datetime import date
 import time
 
 from logging import Logger
-from utils import add_custom_filters_query
-from enums.status_enum import StatusEnum
+from adapters.models import Base, Persona, Examen, Estado, Prueba
+from domain.enums.status_enum import StatusEnum
 
-# declarative base shared by all models
-Base = declarative_base()
 
-class Persona(Base):
-    __tablename__ = "personas"
+def add_custom_filters_query(class_table, query, filters: dict):
+    """Apply `{column: value}` equality filters to a SQLAlchemy query (no-op if empty)."""
+    if not filters:
+        return query
+    for key, value in filters.items():
+        query = query.filter(getattr(class_table, key) == value)
+    return query
 
-    id = Column(Integer, primary_key=True, index=True)
-    nif = Column(String(9), index=True, unique=True, nullable=False)
-    nombre = Column(String(25), index=True, nullable=False)
-    fecha_nacimiento = Column(Date, nullable=False)
-
-    examenes = relationship("Examen", back_populates="persona")
-
-class Examen(Base):
-    __tablename__ = "examenes"
-
-    id = Column(Integer, primary_key=True, index=True)
-    persona_id = Column(Integer, ForeignKey("personas.id"), nullable=False)
-    fecha_examen = Column(Date, nullable=False)
-    tipo_examen = Column(String(15), nullable=False)
-    estado_id = Column(Integer, ForeignKey("estados.id"), nullable=False)
-
-    persona = relationship("Persona", back_populates="examenes")
-    estado = relationship("Estado", back_populates="examenes")
-
-class Estado(Base):
-    __tablename__ = "estados"
-
-    id = Column(Integer, primary_key=True, index=True)
-    nombre = Column(String(20), nullable=False)
-
-    examenes = relationship("Examen", back_populates="estado")
-
-class Prueba(Base):
-    """Per-person prueba RESULT, scraped from the DGT 'ver todas' history or inferred.
-
-    `fecha` is NULL for inferred passes (earlier-in-pipeline / prerequisite carnets).
-    There can be several rows per (persona, carnet, prueba) — one per real attempt.
-    """
-    __tablename__ = "pruebas"
-
-    id = Column(Integer, primary_key=True, index=True)
-    persona_id = Column(Integer, ForeignKey("personas.id"), index=True, nullable=False)
-    carnet = Column(String(15), nullable=False)
-    prueba = Column(String(30), nullable=False)
-    fecha = Column(Date, nullable=True)
-    resultado = Column(String(10), nullable=False)  # "APTO" / "NO APTO" / "INFERIDO"
-
-    persona = relationship("Persona")
 
 class DatabaseManager:
     def __init__(self, host: str, database: str, user: str, password: str, logger: Logger, max_retries: int = 10, retry_delay: int = 2):

@@ -6,9 +6,9 @@ import unittest
 from datetime import date
 from unittest import mock
 
-import main
-from enums.status_enum import StatusEnum
-from enums.resultado_enum import ResultadoEnum
+from services import exam_service as main
+from domain.enums.status_enum import StatusEnum
+from domain.enums.resultado_enum import ResultadoEnum
 
 
 def _row(carnet="B", fecha="02/11/2022", calificacion="APTO", tipo="CIRCULACION"):

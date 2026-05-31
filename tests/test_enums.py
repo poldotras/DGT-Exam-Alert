@@ -3,9 +3,9 @@ import _support  # noqa: F401  (installs sys.path + dep stubs; must be first)
 
 import unittest
 
-from enums.carnet_enum import CarnetEnum
-from enums.resultado_enum import ResultadoEnum
-from enums.status_enum import StatusEnum, STATUS_DB_NAMES
+from domain.enums.carnet_enum import CarnetEnum
+from domain.enums.resultado_enum import ResultadoEnum
+from domain.enums.status_enum import StatusEnum, STATUS_DB_NAMES
 
 
 class CarnetEnumTests(unittest.TestCase):

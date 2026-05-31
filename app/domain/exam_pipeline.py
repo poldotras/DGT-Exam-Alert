@@ -14,8 +14,8 @@ trivial to edit. They do not model every conditional exemption.
 
 import unicodedata
 
-from enums.prueba_enum import PruebaEnum
-from enums.carnet_enum import CarnetEnum
+from domain.enums.prueba_enum import PruebaEnum
+from domain.enums.carnet_enum import CarnetEnum
 
 # Only this prueba is shared across carnets (passing it once counts everywhere).
 GLOBAL_PRUEBAS = {PruebaEnum.TEORICO_COMUN}

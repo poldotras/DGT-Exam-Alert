@@ -4,7 +4,7 @@ import telegram
 from telegram.error import TimedOut, NetworkError, ChatMigrated, BadRequest
 from logging import Logger
 
-from utils import now_madrid
+from utils.timeutils import now_madrid
 
 
 MAX_TELEGRAM_RETRIES = 3

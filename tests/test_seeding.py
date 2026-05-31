@@ -7,21 +7,21 @@ import tempfile
 import unittest
 from unittest import mock
 
-import main
-from enums.status_enum import STATUS_DB_NAMES
+from services import bootstrap, personas_loader
+from domain.enums.status_enum import STATUS_DB_NAMES
 
 
 class SeedStatusesTests(unittest.TestCase):
     def test_creates_all_missing_statuses(self):
         db = mock.Mock()
         db.get_estados.return_value = []  # none exist yet
-        main.seed_statuses(db, mock.Mock())
+        bootstrap.seed_statuses(db, mock.Mock())
         self.assertEqual(db.create_estado.call_count, len(STATUS_DB_NAMES))
 
     def test_is_idempotent_when_all_present(self):
         db = mock.Mock()
         db.get_estados.return_value = [mock.Mock(nombre=name) for _, name in STATUS_DB_NAMES]
-        main.seed_statuses(db, mock.Mock())
+        bootstrap.seed_statuses(db, mock.Mock())
         db.create_estado.assert_not_called()
 
 
@@ -46,7 +46,7 @@ class SeedPeopleTests(unittest.TestCase):
             "fecha_nacimiento": "18/08/2004", "fecha_examen": "02/11/2022",
         }])
         db = self._db_for_new_person()
-        main.seed_people(db, mock.Mock(), json_path=path)
+        personas_loader.seed_people(db, mock.Mock(), json_path=path)
         db.create_persona.assert_called_once()
         db.create_examen.assert_called_once()
 
@@ -56,13 +56,13 @@ class SeedPeopleTests(unittest.TestCase):
             "fecha_nacimiento": "18/08/2004", "fecha_examen": "02/11/2022",
         }])
         db = self._db_for_new_person()
-        main.seed_people(db, mock.Mock(), json_path=path)
+        personas_loader.seed_people(db, mock.Mock(), json_path=path)
         db.create_persona.assert_not_called()
         db.create_examen.assert_not_called()
 
     def test_missing_file_raises(self):
         with self.assertRaises(FileNotFoundError):
-            main.seed_people(mock.Mock(), mock.Mock(), json_path="/no/such/file.json")
+            personas_loader.seed_people(mock.Mock(), mock.Mock(), json_path="/no/such/file.json")
 
 
 if __name__ == "__main__":

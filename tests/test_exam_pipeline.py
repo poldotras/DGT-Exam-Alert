@@ -14,15 +14,15 @@ import _support  # noqa: F401  (installs sys.path + dep stubs; must be first)
 
 import unittest
 
-from exam_pipeline import (
+from domain.exam_pipeline import (
     parse_tipo_prueba,
     pipeline_for,
     prerequisites_for,
     infer_implied_passes,
     is_carnet_complete,
 )
-from enums.carnet_enum import CarnetEnum as C
-from enums.prueba_enum import PruebaEnum as P
+from domain.enums.carnet_enum import CarnetEnum as C
+from domain.enums.prueba_enum import PruebaEnum as P
 
 
 class ParseTipoPruebaTests(unittest.TestCase):

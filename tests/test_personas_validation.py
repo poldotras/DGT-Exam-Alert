@@ -9,7 +9,7 @@ import unittest
 from datetime import date
 from unittest import mock
 
-import main
+from services import personas_loader as main
 
 
 class CheckNifTests(unittest.TestCase):
