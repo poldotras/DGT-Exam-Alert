@@ -99,6 +99,6 @@ When adding a carnet in the panel, use one of the DGT "clase de permiso" codes b
 
 ## License
 
-Distributed under the MIT License. See `License.txt` for details.
+Distributed under the MIT License. See `LICENSE.md` for details.
 
 This project is a modified fork of [Ki-re/DGT-Exam-Alert](https://github.com/Ki-re/DGT-Exam-Alert) (MIT © 2023 Ki-re).
