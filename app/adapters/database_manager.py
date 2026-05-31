@@ -202,3 +202,45 @@ class DatabaseManager:
             )
             query = add_custom_filters_query(Examen, query, filters)
             return query.all()
+
+    # --- read-only helpers for the web panel ---
+    def get_all_personas(self):
+        """Every persona, ordered by name (panel list view)."""
+        with self.SessionLocal() as db:
+            return db.query(Persona).order_by(Persona.nombre).all()
+
+    def get_persona_by_id(self, persona_id: int):
+        """A single persona by primary key, or None."""
+        with self.SessionLocal() as db:
+            return db.query(Persona).filter(Persona.id == persona_id).first()
+
+    def get_all_pruebas_de_persona(self, persona_id: int):
+        """Every prueba row for a persona (APTO / NO APTO / inferred), not just the passed
+        ones, for the panel history. Ordered chronologically by date; inferred rows (fecha
+        NULL) go last. Scalar fields stay readable after the session closes.
+        """
+        with self.SessionLocal() as db:
+            return db.query(Prueba).filter(
+                Prueba.persona_id == persona_id,
+            ).order_by(Prueba.fecha.is_(None), Prueba.fecha).all()
+
+    def get_examenes_con_estado(self, persona_id: int):
+        """Exams of a persona with their Estado eagerly loaded, so the template can read
+        examen.estado.nombre without a DetachedInstanceError.
+        """
+        with self.SessionLocal() as db:
+            return db.query(Examen).options(joinedload(Examen.estado)).filter(
+                Examen.persona_id == persona_id,
+            ).order_by(Examen.fecha_examen).all()
+
+    def get_examenes_activos(self):
+        """Every exam still under watch — PENDING or REVIEWING, any date (unlike
+        get_examenes_a_revisar this does NOT filter by date<=today). Persona and estado
+        eagerly loaded for the panel's review board. Excludes expired/cancelled/approved/failed.
+        """
+        with self.SessionLocal() as db:
+            return db.query(Examen).options(
+                joinedload(Examen.persona), joinedload(Examen.estado),
+            ).filter(
+                Examen.estado_id.in_([StatusEnum.PENDING.value, StatusEnum.REVIEWING.value]),
+            ).order_by(Examen.fecha_examen).all()

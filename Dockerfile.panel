@@ -1,0 +1,12 @@
+# Lightweight image for the web panel (no Chrome/Selenium, unlike the bot's Dockerfile).
+FROM python:3.11-slim
+
+WORKDIR /app
+COPY ./requirements-panel.txt .
+RUN pip install --no-cache-dir --upgrade pip && pip install --no-cache-dir -r requirements-panel.txt
+
+EXPOSE 8000
+
+# The application code is bind-mounted at /app by docker-compose. Serve the Flask panel
+# with gunicorn using the application factory (web.app:create_app()).
+CMD ["gunicorn", "--bind", "0.0.0.0:8000", "--chdir", "/app", "web.app:create_app()"]

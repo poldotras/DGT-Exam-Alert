@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+{% block title %}{{ persona.nombre }}{% endblock %}
+{% block content %}
+<p><a href="{{ url_for('personas.home') }}">&larr; Inicio</a></p>
+<h1>{{ persona.nombre }}</h1>
+<p class="muted">NIF {{ persona.nif }} · Nacimiento {{ persona.fecha_nacimiento.strftime('%d/%m/%Y') }}</p>
+
+<h2>Carnets obtenidos</h2>
+{% if carnets_obtenidos %}
+  <p>{% for c in carnets_obtenidos %}<span class="badge badge-ok">{{ c.value }}</span> {% endfor %}</p>
+{% else %}
+  <p class="muted">Ninguno completado todavía.</p>
+{% endif %}
+
+<h2>Carnets a revisar</h2>
+{% if examenes %}
+<table>
+  <thead><tr><th>Carnet</th><th>Fecha examen</th><th>Estado</th><th></th></tr></thead>
+  <tbody>
+    {% for e in examenes %}
+    <tr>
+      <td>{{ e.tipo_examen }}</td>
+      <td>{{ e.fecha_examen.strftime('%d/%m/%Y') }}</td>
+      <td><span class="badge">{{ e.estado.nombre }}</span></td>
+      <td class="col-action">
+        {% if e.estado_id in estados_activos %}
+        <form method="post" action="{{ url_for('examenes.cancelar_examen', examen_id=e.id) }}"
+              onsubmit="return confirm('¿Cancelar la revisión de {{ e.tipo_examen }} ({{ e.fecha_examen.strftime('%d/%m/%Y') }})?');">
+          <button class="btn btn-danger" type="submit">Cancelar</button>
+        </form>
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="muted">Sin carnets a revisar.</p>
+{% endif %}
+
+<form method="post" action="{{ url_for('examenes.create_examen', persona_id=persona.id) }}" class="card inline">
+  <label>Carnet
+    <select name="carnet" required>
+      {% for c in carnets %}<option value="{{ c.value }}">{{ c.value }}</option>{% endfor %}
+    </select>
+  </label>
+  <label>Desde
+    <input name="fecha_examen" placeholder="dd/mm/aaaa" required>
+  </label>
+  <label>Hasta <span class="muted">(opcional)</span>
+    <input name="fecha_fin" placeholder="dd/mm/aaaa">
+  </label>
+  <button class="btn" type="submit">Añadir a revisar</button>
+</form>
+<p class="muted">Indica solo «Desde» para una fecha, o «Desde» y «Hasta» para vigilar todo un rango de días.</p>
+
+<h2>Historial de pruebas</h2>
+{% if pruebas %}
+<table>
+  <thead><tr><th>Carnet</th><th>Prueba</th><th>Fecha</th><th>Resultado</th></tr></thead>
+  <tbody>
+    {% for pr in pruebas %}
+    <tr>
+      <td>{{ pr.carnet }}</td>
+      <td>{{ pr.prueba }}</td>
+      <td>{{ pr.fecha.strftime('%d/%m/%Y') if pr.fecha else '—' }}</td>
+      <td>
+        {% if pr.resultado == 'APTO' %}<span class="badge badge-ok">APTO</span>
+        {% elif pr.resultado == 'NO APTO' %}<span class="badge badge-no">NO APTO</span>
+        {% else %}<span class="badge">{{ pr.resultado }}</span>{% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="muted">Sin pruebas registradas todavía.</p>
+{% endif %}
+{% endblock %}

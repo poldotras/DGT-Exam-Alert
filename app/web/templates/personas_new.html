@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}Nueva persona{% endblock %}
+{% block content %}
+<p><a href="{{ url_for('personas.home') }}">&larr; Inicio</a></p>
+<h1>Nueva persona</h1>
+<form method="post" action="{{ url_for('personas.create_persona') }}" class="card">
+  <label>NIF / NIE
+    <input name="nif" value="{{ form.nif if form else '' }}" placeholder="12345678Z" required>
+  </label>
+  <label>Nombre
+    <input name="nombre" value="{{ form.nombre if form else '' }}" maxlength="25" required>
+  </label>
+  <label>Fecha de nacimiento
+    <input name="fecha_nacimiento" value="{{ form.fecha_nacimiento if form else '' }}" placeholder="dd/mm/aaaa" required>
+  </label>
+  <div class="actions">
+    <button class="btn" type="submit">Crear</button>
+    <a href="{{ url_for('personas.home') }}">Cancelar</a>
+  </div>
+</form>
+{% endblock %}

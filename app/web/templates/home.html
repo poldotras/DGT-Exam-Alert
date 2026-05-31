@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block title %}Inicio{% endblock %}
+{% block content %}
+
+<h1>En revisión</h1>
+<p class="muted">Carnets que el bot está vigilando (pendientes o revisando). No incluye
+aprobados, suspendidos, caducados ni cancelados.</p>
+{% if examenes %}
+<table>
+  <thead><tr><th>Persona</th><th>Carnet</th><th>Fecha examen</th><th>Estado</th><th></th></tr></thead>
+  <tbody>
+    {% for e in examenes %}
+    <tr>
+      <td><a href="{{ url_for('personas.detail_persona', persona_id=e.persona_id) }}">{{ e.persona.nombre }}</a></td>
+      <td>{{ e.tipo_examen }}</td>
+      <td>{{ e.fecha_examen.strftime('%d/%m/%Y') }}</td>
+      <td><span class="badge">{{ e.estado.nombre }}</span></td>
+      <td class="col-action">
+        <form method="post" action="{{ url_for('examenes.cancelar_examen', examen_id=e.id) }}"
+              onsubmit="return confirm('¿Cancelar la revisión de {{ e.tipo_examen }} ({{ e.fecha_examen.strftime('%d/%m/%Y') }})?');">
+          <button class="btn btn-danger" type="submit">Cancelar</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="muted">No hay exámenes en revisión ahora mismo.</p>
+{% endif %}
+
+<div class="row-between">
+  <h1>Personas</h1>
+  <a class="btn" href="{{ url_for('personas.new_persona') }}">+ Nueva persona</a>
+</div>
+{% if personas %}
+<table>
+  <thead><tr><th>Nombre</th><th>NIF</th><th>Nacimiento</th><th></th></tr></thead>
+  <tbody>
+    {% for p in personas %}
+    <tr>
+      <td>{{ p.nombre }}</td>
+      <td>{{ p.nif }}</td>
+      <td>{{ p.fecha_nacimiento.strftime('%d/%m/%Y') }}</td>
+      <td><a href="{{ url_for('personas.detail_persona', persona_id=p.id) }}">Ver</a></td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="muted">No hay personas todavía. <a href="{{ url_for('personas.new_persona') }}">Crear la primera</a>.</p>
+{% endif %}
+{% endblock %}

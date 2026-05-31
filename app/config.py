@@ -79,6 +79,11 @@ class Config:
     telegram_bot_token: str = field(default_factory=lambda: _env_str("TELEGRAM_BOT_TOKEN", ""))
     telegram_chat_id: str = field(default_factory=lambda: _env_str("TELEGRAM_CHAT_ID", ""))
 
+    # Web panel (HTTP Basic Auth + listening port)
+    panel_user: str = field(default_factory=lambda: _env_str("PANEL_USER", "admin"))
+    panel_password: str = field(default_factory=lambda: _env_str("PANEL_PASSWORD", ""))
+    panel_port: int = field(default_factory=lambda: _env_int("PANEL_PORT", 8000))
+
 
 # Singleton instantiated at import time
 config = Config()
