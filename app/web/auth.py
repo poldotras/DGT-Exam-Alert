@@ -7,6 +7,10 @@ from flask import request, Response
 
 from config import config
 
+# Endpoints served without credentials so the panel can be installed as a PWA: the browser
+# reads the manifest without sending Basic Auth, and registers the worker before login.
+PUBLIC_ENDPOINTS = {"static", "pwa.manifest", "pwa.service_worker"}
+
 
 def _unauthorized():
     return Response(
@@ -24,8 +28,8 @@ def require_auth():
     """
     if not config.panel_password:
         return None  # auth disabled (warned at startup)
-    if request.endpoint == "static":
-        return None  # let CSS/static load without credentials
+    if request.endpoint in PUBLIC_ENDPOINTS:
+        return None  # let static assets + PWA manifest/worker load without credentials
     auth = request.authorization
     if auth and auth.username == config.panel_user and auth.password == config.panel_password:
         return None

@@ -7,6 +7,7 @@ there. It runs anywhere Flask is available (the panel container, CI, or a local 
 """
 import _support  # noqa: F401  (installs sys.path + dep stubs; must be first)
 
+import json
 import unittest
 from types import SimpleNamespace
 from unittest import mock
@@ -83,6 +84,53 @@ class PanelRoutesTests(unittest.TestCase):
     def test_basic_auth_blocks_when_password_set(self):
         with mock.patch("web.auth.config", SimpleNamespace(panel_user="admin", panel_password="secret")):
             self.assertEqual(self.client.get("/").status_code, 401)
+
+
+@unittest.skipUnless(HAS_FLASK, "Flask no instalado (los tests de rutas corren en el contenedor del panel)")
+class PanelPwaTests(unittest.TestCase):
+    """PWA plumbing that makes the panel installable as an app on iOS and Android."""
+
+    def _client(self, password=""):
+        from web.app import create_app
+        patcher = mock.patch("web.auth.config", SimpleNamespace(panel_user="admin", panel_password=password))
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        db = mock.Mock()
+        db.get_all_personas.return_value = []
+        db.get_examenes_activos.return_value = []
+        app = create_app(db=db)
+        app.config.update(TESTING=True)
+        return app.test_client()
+
+    def test_manifest_served_with_required_fields(self):
+        resp = self._client().get("/manifest.webmanifest")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.headers["Content-Type"], "application/manifest+json")
+        data = json.loads(resp.data)
+        # the minimum an installable PWA needs: standalone display, start_url, and 192/512 icons
+        self.assertEqual(data["display"], "standalone")
+        self.assertEqual(data["start_url"], "/")
+        icons = {(i["sizes"], i["purpose"]) for i in data["icons"]}
+        self.assertIn(("192x192", "any"), icons)
+        self.assertIn(("512x512", "any"), icons)
+        self.assertIn(("512x512", "maskable"), icons)
+
+    def test_service_worker_served_at_root_with_fetch_handler(self):
+        resp = self._client().get("/sw.js")
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("javascript", resp.headers["Content-Type"])
+        # root scope is what lets the worker control every page of the panel
+        self.assertEqual(resp.headers.get("Service-Worker-Allowed"), "/")
+        # a fetch handler is required for the install criteria on Android/Chrome
+        self.assertIn(b'addEventListener("fetch"', resp.data)
+
+    def test_manifest_and_worker_bypass_auth(self):
+        # With a password set the panel is locked, but the browser must still read the
+        # manifest and register the worker (without credentials) to offer "install".
+        client = self._client(password="secret")
+        self.assertEqual(client.get("/").status_code, 401)
+        self.assertEqual(client.get("/manifest.webmanifest").status_code, 200)
+        self.assertEqual(client.get("/sw.js").status_code, 200)
 
 
 if __name__ == "__main__":

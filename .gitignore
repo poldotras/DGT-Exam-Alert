@@ -2,5 +2,6 @@
 chromedriver
 .env
 *.png
+!app/web/static/icons/*.png
 *.log
 *.log.*
