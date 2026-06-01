@@ -14,6 +14,7 @@ from adapters.database_manager import DatabaseManager
 from web.auth import require_auth
 from web.routes_personas import bp as personas_bp
 from web.routes_examenes import bp as examenes_bp
+from web.routes_pwa import bp as pwa_bp
 
 
 def _build_logger():
@@ -49,4 +50,5 @@ def create_app(db=None):
     app.before_request(require_auth)
     app.register_blueprint(personas_bp)
     app.register_blueprint(examenes_bp)
+    app.register_blueprint(pwa_bp)
     return app

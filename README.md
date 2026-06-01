@@ -38,6 +38,15 @@ Runs as its own container (`panel`) on `PANEL_PORT` (default `8000`), protected 
 - **Person detail** — obtained carnets, the carnets being reviewed (with their status), the full prueba history, and a form to add a carnet to watch.
 - **Add a carnet to review** — choose the carnet and either a single date or a **start–end range** (creates one exam per day); already-registered dates are skipped.
 
+### Install as an app (iPhone / Android)
+
+The panel is a **PWA**, so you can install it to your phone's home screen and open it like a native app (standalone, no browser bar):
+
+- **Android (Chrome):** open the panel → menu (⋮) → **Install app** / **Add to Home screen**.
+- **iPhone/iPad (Safari):** open the panel → **Share** → **Add to Home Screen**.
+
+It ships a web manifest (`/manifest.webmanifest`), DGT icons, and a service worker (`/sw.js`) that shows a friendly offline page when there's no connection. The manifest and worker are served without auth so the install works even before you log in — your data stays behind Basic Auth as before.
+
 ### `carnet` codes
 
 When adding a carnet in the panel, use one of the DGT "clase de permiso" codes below (write `EB`, not `B+E`, and `B`, not `b`):
