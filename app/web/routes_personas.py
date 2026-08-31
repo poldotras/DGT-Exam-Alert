@@ -8,7 +8,7 @@ from flask import (
 from domain.enums.carnet_enum import CarnetEnum
 from domain.enums.status_enum import StatusEnum
 from services.validation import check_nif, check_date_str
-from web.views import carnets_obtenidos
+from web.views import agrupar_examenes, agrupar_pruebas, carnets_obtenidos
 
 bp = Blueprint("personas", __name__)
 
@@ -21,7 +21,7 @@ def home():
     db = current_app.config["DB"]
     return render_template(
         "home.html",
-        examenes=db.get_examenes_activos(),
+        examenes=agrupar_examenes(db.get_examenes_activos(), por_persona=True),
         personas=db.get_all_personas(),
     )
 
@@ -70,8 +70,8 @@ def detail_persona(persona_id):
     return render_template(
         "persona_detail.html",
         persona=persona,
-        examenes=db.get_examenes_con_estado(persona_id),
-        pruebas=db.get_all_pruebas_de_persona(persona_id),
+        examenes=agrupar_examenes(db.get_examenes_con_estado(persona_id)),
+        pruebas=agrupar_pruebas(db.get_all_pruebas_de_persona(persona_id)),
         carnets_obtenidos=carnets_obtenidos(db, persona_id),
         carnets=list(CarnetEnum),
         estados_activos=ESTADOS_ACTIVOS,

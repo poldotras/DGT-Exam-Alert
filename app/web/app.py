@@ -15,7 +15,7 @@ from web.auth import require_auth
 from web.routes_personas import bp as personas_bp
 from web.routes_examenes import bp as examenes_bp
 from web.routes_pwa import bp as pwa_bp
-from web.views import estado_badge_class
+from web.views import estado_badge_class, rango_fechas
 
 
 def _build_logger():
@@ -48,8 +48,9 @@ def create_app(db=None):
         logger=logger,
     )
 
-    # templates colour the state badges through this helper
+    # helpers the templates use to render the exam listings
     app.jinja_env.globals["estado_badge_class"] = estado_badge_class
+    app.jinja_env.globals["rango_fechas"] = rango_fechas
 
     app.before_request(require_auth)
     app.register_blueprint(personas_bp)

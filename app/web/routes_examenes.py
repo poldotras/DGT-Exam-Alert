@@ -2,14 +2,14 @@
 exam's review.
 
 Adding accepts a single date or a start..end range, reusing the shared validators in
-services/validation.py (check_exam_date_field / dates_from_field).
+services/validation.py (check_exam_date_field / dates_from_field). Cancelling takes the
+ids of a whole grouped date range, since that is what a listing row shows.
 """
 from flask import (
     Blueprint, request, redirect, url_for, flash, current_app, abort,
 )
 
 from domain.enums.carnet_enum import CarnetEnum
-from domain.enums.status_enum import StatusEnum
 from services.validation import check_exam_date_field, dates_from_field
 
 bp = Blueprint("examenes", __name__)
@@ -56,10 +56,19 @@ def create_examen(persona_id):
     return redirect(url_for("personas.detail_persona", persona_id=persona_id))
 
 
-@bp.route("/examenes/<int:examen_id>/cancelar", methods=["POST"])
-def cancelar_examen(examen_id):
-    """Cancel an exam's review (set its state to CANCELLED). Returns to the previous page."""
+@bp.route("/examenes/cancelar", methods=["POST"])
+def cancelar_examenes():
+    """Cancel the reviews posted as `examen_id` (set them to CANCELLED). A listing row is a
+    date range, so it sends every id in the range. Returns to the previous page.
+    """
     db = current_app.config["DB"]
-    db.update_estado_examen(examen_id, StatusEnum.CANCELLED.value)
-    flash("Revisión cancelada.", "ok")
+    try:
+        ids = [int(v) for v in request.form.getlist("examen_id")]
+    except ValueError:
+        abort(400)
+    if not ids:
+        abort(400)
+
+    canceladas = db.cancelar_examenes(ids)
+    flash(f"{canceladas} revisión(es) cancelada(s).", "ok")
     return redirect(request.referrer or url_for("personas.home"))

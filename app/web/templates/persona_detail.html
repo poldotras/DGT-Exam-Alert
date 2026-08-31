@@ -15,17 +15,19 @@
 <h2>Carnets a revisar</h2>
 {% if examenes %}
 <table>
-  <thead><tr><th>Carnet</th><th>Fecha examen</th><th>Estado</th><th></th></tr></thead>
+  <thead><tr><th>Carnet</th><th>Fechas</th><th>Estado</th><th></th></tr></thead>
   <tbody>
-    {% for e in examenes %}
+    {% for g in examenes %}
     <tr>
-      <td>{{ e.tipo_examen }}</td>
-      <td>{{ e.fecha_examen.strftime('%d/%m/%Y') }}</td>
-      <td><span class="badge {{ estado_badge_class(e.estado_id) }}">{{ e.estado.nombre }}</span></td>
+      <td>{{ g.tipo_examen }}</td>
+      <td class="col-fechas">{{ rango_fechas(g.desde, g.hasta) }}
+        {% if g.dias > 1 %}<span class="muted">({{ g.dias }} días)</span>{% endif %}</td>
+      <td><span class="badge {{ estado_badge_class(g.estado_id) }}">{{ g.estado.nombre }}</span></td>
       <td class="col-action">
-        {% if e.estado_id in estados_activos %}
-        <form method="post" action="{{ url_for('examenes.cancelar_examen', examen_id=e.id) }}"
-              onsubmit="return confirm('¿Cancelar la revisión de {{ e.tipo_examen }} ({{ e.fecha_examen.strftime('%d/%m/%Y') }})?');">
+        {% if g.estado_id in estados_activos %}
+        <form method="post" action="{{ url_for('examenes.cancelar_examenes') }}"
+              onsubmit="return confirm('¿Cancelar la revisión de {{ g.tipo_examen }} ({{ rango_fechas(g.desde, g.hasta) }})?');">
+          {% for examen_id in g.ids %}<input type="hidden" name="examen_id" value="{{ examen_id }}">{% endfor %}
           <button class="btn btn-danger" type="submit">Cancelar</button>
         </form>
         {% endif %}
@@ -57,13 +59,14 @@
 <h2>Historial de pruebas</h2>
 {% if pruebas %}
 <table>
-  <thead><tr><th>Carnet</th><th>Prueba</th><th>Fecha</th><th>Resultado</th></tr></thead>
+  <thead><tr><th>Carnet</th><th>Prueba</th><th>Fechas</th><th>Resultado</th></tr></thead>
   <tbody>
     {% for pr in pruebas %}
     <tr>
       <td>{{ pr.carnet }}</td>
       <td>{{ pr.prueba }}</td>
-      <td>{{ pr.fecha.strftime('%d/%m/%Y') if pr.fecha else '—' }}</td>
+      <td class="col-fechas">{{ rango_fechas(pr.desde, pr.hasta) }}
+        {% if pr.filas|length > 1 %}<span class="muted">({{ pr.filas|length }} registros)</span>{% endif %}</td>
       <td>
         {% if pr.resultado == 'APTO' %}<span class="badge badge-ok">APTO</span>
         {% elif pr.resultado == 'NO APTO' %}<span class="badge badge-no">NO APTO</span>
