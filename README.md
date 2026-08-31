@@ -34,9 +34,10 @@ The system has two parts that share a MySQL database:
 
 Runs as its own container (`panel`) on `PANEL_PORT` (default `8000`), protected by HTTP Basic Auth (`PANEL_USER` / `PANEL_PASSWORD`). If `PANEL_PASSWORD` is left empty it starts **without** authentication (a warning is logged).
 
-- **Home** — the people list and every exam under review (pending/reviewing) on a single page, with a **Cancel** button per review.
+- **Home** — the people list and every exam under review (pending/reviewing) on a single page, with a **Cancel** button per row.
 - **Person detail** — obtained carnets, the carnets being reviewed (with their status), the full prueba history, and a form to add a carnet to watch.
 - **Add a carnet to review** — choose the carnet and either a single date or a **start–end range** (creates one exam per day); already-registered dates are skipped.
+- **Grouped date ranges** — a watched range is stored as one exam per day, but the listings collapse consecutive days that share carnet and status into a single `02/02/2026 → 09/02/2026` row, so a long range doesn't flood the table. The range splits as the bot advances: if the 2nd–4th are already reviewed/expired, the 5th is being reviewed and the 6th–9th are still pending, you get three rows instead of eight. **Cancel** on a row cancels every day in it. The prueba history is grouped the same way (same carnet, prueba and result on consecutive days).
 
 ### Install as an app (iPhone / Android)
 

@@ -75,11 +75,24 @@ class PanelRoutesTests(unittest.TestCase):
         self.assertEqual(resp.status_code, 302)
         self.assertEqual(self.db.create_examen.call_count, 3)  # 3-day inclusive range
 
-    def test_cancelar_examen_sets_cancelled_and_redirects(self):
-        from domain.enums.status_enum import StatusEnum
-        resp = self.client.post("/examenes/5/cancelar")
+    def test_cancelar_examen_cancels_the_posted_id_and_redirects(self):
+        self.db.cancelar_examenes.return_value = 1
+        resp = self.client.post("/examenes/cancelar", data={"examen_id": "5"})
         self.assertEqual(resp.status_code, 302)
-        self.db.update_estado_examen.assert_called_once_with(5, StatusEnum.CANCELLED.value)
+        self.db.cancelar_examenes.assert_called_once_with([5])
+
+    def test_cancelar_examen_cancels_every_id_of_a_grouped_range(self):
+        # a listing row is a date range, so it posts one examen_id per day
+        self.db.cancelar_examenes.return_value = 3
+        resp = self.client.post("/examenes/cancelar", data={"examen_id": ["5", "6", "7"]})
+        self.assertEqual(resp.status_code, 302)
+        self.db.cancelar_examenes.assert_called_once_with([5, 6, 7])
+
+    def test_cancelar_examen_rejects_missing_or_invalid_ids(self):
+        self.assertEqual(self.client.post("/examenes/cancelar").status_code, 400)
+        self.assertEqual(
+            self.client.post("/examenes/cancelar", data={"examen_id": "x"}).status_code, 400)
+        self.db.cancelar_examenes.assert_not_called()
 
     def test_basic_auth_blocks_when_password_set(self):
         with mock.patch("web.auth.config", SimpleNamespace(panel_user="admin", panel_password="secret")):

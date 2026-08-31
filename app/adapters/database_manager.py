@@ -168,6 +168,16 @@ class DatabaseManager:
         db.commit()
         return len(examenes)
 
+    def cancelar_examenes(self, examen_ids) -> int:
+        """Cancel every exam whose id is in `examen_ids` (the panel cancels a whole
+        grouped date range at once). Returns how many rows were cancelled.
+        """
+        ids = list(examen_ids)
+        if not ids:
+            return 0
+        with self.SessionLocal() as db:
+            return self._cancelar(db, db.query(Examen).filter(Examen.id.in_(ids)))
+
     def cancelar_pendientes_de_carnet(self, persona_id: int, tipo_examen: str, excluir_examen_id: int = None) -> int:
         """Cancel every still-open exam (pending/reviewing) of the person for a carnet.
         Called when the whole carnet pipeline is complete.
