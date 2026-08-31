@@ -4,7 +4,7 @@
  * static shell and shows an offline page when a navigation can't reach the network. It
  * deliberately never caches authenticated HTML, so panel data is always fresh and never
  * leaked from the cache. */
-const CACHE = "dgt-panel-v1";
+const CACHE = "dgt-panel-v2";
 const PRECACHE = [
   "/static/style.css",
   "/static/offline.html",
