@@ -14,7 +14,7 @@ aprobados, suspendidos, caducados ni cancelados.</p>
       <td><a href="{{ url_for('personas.detail_persona', persona_id=e.persona_id) }}">{{ e.persona.nombre }}</a></td>
       <td>{{ e.tipo_examen }}</td>
       <td>{{ e.fecha_examen.strftime('%d/%m/%Y') }}</td>
-      <td><span class="badge">{{ e.estado.nombre }}</span></td>
+      <td><span class="badge {{ estado_badge_class(e.estado_id) }}">{{ e.estado.nombre }}</span></td>
       <td class="col-action">
         <form method="post" action="{{ url_for('examenes.cancelar_examen', examen_id=e.id) }}"
               onsubmit="return confirm('¿Cancelar la revisión de {{ e.tipo_examen }} ({{ e.fecha_examen.strftime('%d/%m/%Y') }})?');">

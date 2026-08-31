@@ -21,7 +21,7 @@
     <tr>
       <td>{{ e.tipo_examen }}</td>
       <td>{{ e.fecha_examen.strftime('%d/%m/%Y') }}</td>
-      <td><span class="badge">{{ e.estado.nombre }}</span></td>
+      <td><span class="badge {{ estado_badge_class(e.estado_id) }}">{{ e.estado.nombre }}</span></td>
       <td class="col-action">
         {% if e.estado_id in estados_activos %}
         <form method="post" action="{{ url_for('examenes.cancelar_examen', examen_id=e.id) }}"
