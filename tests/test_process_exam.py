@@ -70,5 +70,32 @@ class ProcessExamTests(unittest.TestCase):
         self.logger.error.assert_called()
 
 
+class _Stop(Exception):
+    """Breaks out of the endless run_loop inside a test."""
+
+
+class RunLoopTests(unittest.TestCase):
+    def setUp(self):
+        self.db = mock.Mock()
+        self.db.get_examenes_a_revisar.return_value = []
+        self.args = (self.db, mock.Mock(), mock.Mock(), mock.Mock())
+
+    def test_gives_the_daily_audit_a_turn_on_every_iteration(self):
+        with mock.patch("services.exam_service.run_due_audit", side_effect=[True, _Stop()]) as audit, \
+                mock.patch("services.exam_service.time.sleep") as sleep:
+            with self.assertRaises(_Stop):
+                main.run_loop(*self.args)
+        self.assertEqual(audit.call_count, 2)
+        # the audit paces itself, so the idle sleep is skipped right after one runs
+        sleep.assert_not_called()
+
+    def test_idles_when_there_is_nothing_to_audit_nor_review(self):
+        with mock.patch("services.exam_service.run_due_audit", return_value=False), \
+                mock.patch("services.exam_service.time.sleep", side_effect=_Stop()) as sleep:
+            with self.assertRaises(_Stop):
+                main.run_loop(*self.args)
+        sleep.assert_called_once_with(main.SLEEP_IF_NO_WORK)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -45,6 +45,10 @@ class Config:
     time_between_exams: int = field(default_factory=lambda: _env_int("TIEMPO_ENTRE_EXAMENES", 300))
     service_down_wait_time: int = field(default_factory=lambda: _env_int("TIEMPO_ESPERA_SERVICE_DOWN", 60))
     expired_after_days: int = field(default_factory=lambda: _env_int("DIAS_SE_CONSIDERA_CADUCADO", 7))
+    # Daily audit: once a day per persona the bot reopens the DGT history with an
+    # already-known exam date to catch exams nobody registered in the panel.
+    # AUDITORIA_DIARIA=0 turns it off (it costs one extra DGT search per persona a day).
+    audit_enabled: bool = field(default_factory=lambda: _env_bool("AUDITORIA_DIARIA", True))
 
     # Selenium / browser
     max_result_wait_time: int = field(default_factory=lambda: _env_int("TIEMPO_MAXIMO_ESPERA_RESULTADOS", 300))

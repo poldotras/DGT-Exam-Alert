@@ -61,3 +61,20 @@ class Prueba(Base):
     resultado = Column(String(10), nullable=False)  # "APTO" / "NO APTO" / "INFERIDO"
 
     persona = relationship("Persona")
+
+
+class Auditoria(Base):
+    """Daily-audit bookkeeping: one row per persona with the last day it was audited.
+
+    The audit re-opens the DGT results page with an exam date the person is already known
+    to have a result for, re-reads the full prueba history and looks for exams that were
+    never registered in `examenes`. Storing the date (Europe/Madrid) is what makes it run
+    once a day per persona across restarts.
+    """
+    __tablename__ = "auditorias"
+
+    id = Column(Integer, primary_key=True, index=True)
+    persona_id = Column(Integer, ForeignKey("personas.id"), index=True, unique=True, nullable=False)
+    fecha = Column(Date, nullable=False)
+
+    persona = relationship("Persona")

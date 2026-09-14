@@ -25,10 +25,26 @@ These modifications were made quickly and easily to adapt to my needs. It was de
 
 The system has two parts that share a MySQL database:
 
-- **Bot** (`app/main.py`): periodically queries the DGT website for every exam still under review. When a result appears it notifies via Telegram (screenshot + text), records the full prueba history, infers implied passes, and cancels a carnet's remaining exams once its pipeline is complete. Each exam carries a status so finished ones aren't re-checked.
+- **Bot** (`app/main.py`): periodically queries the DGT website for every exam still under review. When a result appears it notifies via Telegram (screenshot + text), records the full prueba history, infers implied passes, and cancels a carnet's remaining exams once its pipeline is complete. Each exam carries a status so finished ones aren't re-checked. Once a day per person it also re-reads the DGT history looking for exams nobody registered (see **Daily audit**).
 - **Web panel** (`app/web`, Flask): the single way to manage data — add people, add the carnets/dates to watch, see what's under review, cancel reviews, and consult each person's prueba history and obtained carnets.
 
 > Personas and exams are managed **entirely through the panel**. There is no `personas.json` anymore.
+
+## Daily audit (exams nobody registered)
+
+The bot only ever asks the DGT about the exams somebody added in the panel, so an exam a person really sat but nobody registered would be invisible to it. **Once a day, for each person**, the bot reopens the DGT results page using an exam date that person is *already known to have a result for* (the form only answers for a date that really exists), expands «ver todas las pruebas» — the page's other-exams section — and compares that history against what is registered:
+
+- every prueba in the history is recorded, so results, inferred passes and completed carnets stay in sync with the DGT;
+- any `clase de permiso` + date in the history with **no exam registered** is an exam that escaped the watch list: it is notified over Telegram and added to the person with the result it already carries (`Aprobado` / `Suspendido`), so the panel shows it and the same exam is never reported twice.
+
+How it behaves:
+
+- **One person per main-loop iteration**, so audits interleave with the normal polling instead of blocking it; each search is paced by `TIEMPO_ENTRE_EXAMENES`, like any other query.
+- A person with no dated result yet is skipped — there is nothing to query the DGT with.
+- If the DGT no longer answers for the newest known date, the next two most recent ones are tried. If none of them answers either (the records were purged), the day is still counted — retrying would only burn searches, and it fixes itself as soon as the person has a newer result. A real outage or an unexpected error instead leaves the person **due**, so it is retried later rather than losing the day.
+- The last audited day is stored per person (`auditorias` table, created automatically on start), so restarts don't re-audit everybody.
+- **First run:** it backfills whatever the DGT history holds, which for someone who sat exams before using the bot can be several old exams at once — expect one longer Telegram message the first day (capped at 15 entries) and quiet afterwards.
+- Set `AUDITORIA_DIARIA=0` in `.env` to turn it off.
 
 ## Web panel
 
