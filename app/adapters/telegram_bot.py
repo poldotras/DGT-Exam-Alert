@@ -104,6 +104,14 @@ class TelegramBot:
             )
         self._logger.info("Photo sent successfully")
 
+    async def _send_message(self, text):
+        await self._bot.send_message(
+            chat_id=self._chat_id,
+            text=text,
+            parse_mode=telegram.constants.ParseMode.HTML,
+        )
+        self._logger.info("Message sent successfully")
+
     async def _update_alive_status(self):
         current_time = now_madrid().strftime('%H:%M:%S')
         await self._bot.edit_message_text(
@@ -114,6 +122,10 @@ class TelegramBot:
 
     def send_result(self, is_approved, screenshot_path):
         self._run_async(self._send_result, is_approved, screenshot_path)
+
+    def send_message(self, text):
+        """Send an HTML text message (the daily audit uses it to report untracked exams)."""
+        self._run_async(self._send_message, text)
 
     def update_alive_status(self):
         self._run_async(self._update_alive_status)

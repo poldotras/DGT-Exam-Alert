@@ -1,9 +1,9 @@
-"""Tests for the result/registration business logic in main.py, using mock doubles for
-the DatabaseManager and TelegramBot (no real DB / browser / network)."""
+"""Tests for the per-exam result logic in services/exam_service.py, using mock doubles
+for the DatabaseManager and TelegramBot (no real DB / browser / network). The history
+registration it delegates to is covered in test_history_service.py."""
 import _support  # noqa: F401  (installs sys.path + dep stubs; must be first)
 
 import unittest
-from datetime import date
 from unittest import mock
 
 from services import exam_service as main
@@ -23,59 +23,6 @@ class ResultForExamenTests(unittest.TestCase):
     def test_no_match_returns_none(self):
         history = [_row(fecha="01/01/2000")]
         self.assertIsNone(main._result_for_examen(history, "B", "02/11/2022"))
-
-
-class RegisterHistoryTests(unittest.TestCase):
-    def setUp(self):
-        self.db = mock.Mock()
-        self.logger = mock.Mock()
-
-    def test_registers_parsed_row(self):
-        self.db.registrar_resultado_prueba.return_value = True
-        main._register_history(2, [_row(tipo="TEORICO COMUN")], self.db, self.logger)
-        self.db.registrar_resultado_prueba.assert_called_once_with(
-            2, "B", "teorico_comun", date(2022, 11, 2), "APTO"
-        )
-
-    def test_unknown_tipo_raises(self):
-        with self.assertRaises(ValueError):
-            main._register_history(2, [_row(tipo="NO EXISTE")], self.db, self.logger)
-
-    def test_unparseable_date_is_stored_as_none(self):
-        self.db.registrar_resultado_prueba.return_value = True
-        main._register_history(2, [_row(fecha="bad-date")], self.db, self.logger)
-        self.logger.warning.assert_called()
-        _, args, _ = self.db.registrar_resultado_prueba.mock_calls[0]
-        self.assertIsNone(args[3])  # fecha argument
-
-
-class RegisterInferredTests(unittest.TestCase):
-    def test_inferred_earlier_pass_is_registered(self):
-        db = mock.Mock()
-        db.get_pruebas_aprobadas.return_value = {("B", "circulacion")}
-        db.registrar_resultado_prueba.return_value = True
-        main._register_inferred(2, db, mock.Mock())
-        # passing CIRCULACION of B implies TEORICO_COMUN of B, registered with no date
-        db.registrar_resultado_prueba.assert_called_once_with(
-            2, "B", "teorico_comun", None, "APTO"
-        )
-
-
-class ReconcileCompletedCarnetsTests(unittest.TestCase):
-    def test_complete_carnet_cancels_pending(self):
-        db = mock.Mock()
-        db.get_pruebas_aprobadas.return_value = {("B", "teorico_comun"), ("B", "circulacion")}
-        db.get_carnets_pendientes.return_value = {"B"}
-        db.cancelar_pendientes_de_carnet.return_value = 1
-        main._reconcile_completed_carnets(2, db, mock.Mock())
-        db.cancelar_pendientes_de_carnet.assert_called_once_with(2, "B")
-
-    def test_incomplete_carnet_is_not_cancelled(self):
-        db = mock.Mock()
-        db.get_pruebas_aprobadas.return_value = {("B", "circulacion")}  # no teorico_comun
-        db.get_carnets_pendientes.return_value = {"B"}
-        main._reconcile_completed_carnets(2, db, mock.Mock())
-        db.cancelar_pendientes_de_carnet.assert_not_called()
 
 
 class HandleResultTests(unittest.TestCase):

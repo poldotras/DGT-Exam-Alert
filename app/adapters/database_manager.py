@@ -5,7 +5,7 @@ from datetime import date
 import time
 
 from logging import Logger
-from adapters.models import Base, Persona, Examen, Estado, Prueba
+from adapters.models import Base, Persona, Examen, Estado, Prueba, Auditoria
 from domain.enums.status_enum import StatusEnum
 
 
@@ -212,6 +212,63 @@ class DatabaseManager:
             )
             query = add_custom_filters_query(Examen, query, filters)
             return query.all()
+
+    # --- daily audit (one pass per persona per day over the DGT prueba history) ---
+    def get_personas_a_auditar(self, hoy: date):
+        """Personas whose daily audit hasn't run today yet, never-audited ones first.
+
+        Left join on `auditorias`: no row (never audited) or a row older than `hoy` means
+        the audit is due. The rest of the audit only needs the persona's scalar fields
+        (nif, fecha_nacimiento), already loaded when the session closes.
+        """
+        with self.SessionLocal() as db:
+            rows = db.query(Persona, Auditoria.fecha).outerjoin(
+                Auditoria, Auditoria.persona_id == Persona.id,
+            ).filter(
+                (Auditoria.fecha.is_(None)) | (Auditoria.fecha < hoy),
+            ).order_by(Auditoria.fecha.is_(None).desc(), Auditoria.fecha, Persona.id).all()
+            return [persona for (persona, _fecha) in rows]
+
+    def marcar_auditoria(self, persona_id: int, fecha: date):
+        """Record that the persona's audit ran on `fecha` (upsert: one row per persona)."""
+        with self.SessionLocal() as db:
+            auditoria = db.query(Auditoria).filter(Auditoria.persona_id == persona_id).first()
+            if auditoria is None:
+                db.add(Auditoria(persona_id=persona_id, fecha=fecha))
+            else:
+                auditoria.fecha = fecha
+            db.commit()
+
+    def get_ultima_auditoria(self, persona_id: int):
+        """Date of the persona's last audit, or None if it has never run."""
+        with self.SessionLocal() as db:
+            row = db.query(Auditoria.fecha).filter(Auditoria.persona_id == persona_id).first()
+            return row[0] if row else None
+
+    def get_fechas_con_resultado(self, persona_id: int):
+        """(carnet, fecha) pairs the person already has a DATED result for, newest first.
+
+        Each pair is a search the DGT is known to answer, so the audit can reopen the
+        results page with it and re-read the full prueba history. Inferred passes (fecha
+        NULL) are excluded: they were never really sat and the DGT knows nothing of them.
+        """
+        with self.SessionLocal() as db:
+            rows = db.query(Prueba.carnet, Prueba.fecha).filter(
+                Prueba.persona_id == persona_id,
+                Prueba.fecha.is_not(None),
+            ).distinct().order_by(Prueba.fecha.desc()).all()
+            return [(row[0], row[1]) for row in rows]
+
+    def get_examenes_registrados(self, persona_id: int) -> set:
+        """(tipo_examen, fecha_examen) of every exam registered for the person, in ANY
+        state. This is the 'what we are watching' set the audit compares the scraped DGT
+        history against: a history row outside it is an exam nobody added.
+        """
+        with self.SessionLocal() as db:
+            rows = db.query(Examen.tipo_examen, Examen.fecha_examen).filter(
+                Examen.persona_id == persona_id,
+            ).distinct().all()
+            return {(row[0], row[1]) for row in rows}
 
     # --- read-only helpers for the web panel ---
     def get_all_personas(self):
